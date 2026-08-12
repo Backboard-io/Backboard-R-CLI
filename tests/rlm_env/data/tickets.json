@@ -1,0 +1,38 @@
+[
+	{
+		"id": "TCK-101",
+		"title": "Users cannot log in after password reset",
+		"area": "auth",
+		"severity": 4,
+		"affectedUsers": 320,
+		"revenueImpact": false,
+		"createdHoursAgo": 6
+	},
+	{
+		"id": "TCK-102",
+		"title": "Typo in upgrade modal headline",
+		"area": "billing",
+		"severity": 1,
+		"affectedUsers": 900,
+		"revenueImpact": false,
+		"createdHoursAgo": 18
+	},
+	{
+		"id": "TCK-103",
+		"title": "Checkout fails when discounted item is in cart",
+		"area": "checkout",
+		"severity": 5,
+		"affectedUsers": 180,
+		"revenueImpact": true,
+		"createdHoursAgo": 2
+	},
+	{
+		"id": "TCK-104",
+		"title": "Export CSV timezone label is confusing",
+		"area": "reports",
+		"severity": 2,
+		"affectedUsers": 44,
+		"revenueImpact": false,
+		"createdHoursAgo": 48
+	}
+]

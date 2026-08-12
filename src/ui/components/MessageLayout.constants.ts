@@ -1,0 +1,3 @@
+export const ASSISTANT_OUTPUT_MARKER = "◆";
+export const ASSISTANT_SEPARATOR_CHAR = "─";
+export const ASSISTANT_SEPARATOR_MIN_WIDTH = 20;

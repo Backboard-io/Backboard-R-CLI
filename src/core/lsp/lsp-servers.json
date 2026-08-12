@@ -1,0 +1,81 @@
+{
+	"//": "Single source of truth for LSP server ids, binaries, and npm packages. Consumed by the runtime registry (cli-ts/src/core/lsp/servers.ts) and the eval provisioning scripts (cli-ts-eval/internal/agent/q_cli_harbor/lsp_manifest.py). Edit here; never hardcode these triples elsewhere.",
+	"servers": [
+		{
+			"id": "pyright",
+			"binary": "pyright-langserver",
+			"npmPackage": "pyright",
+			"eval": { "trialInstall": false }
+		},
+		{
+			"id": "bash",
+			"binary": "bash-language-server",
+			"npmPackage": "bash-language-server"
+		},
+		{
+			"id": "typescript",
+			"binary": "typescript-language-server",
+			"npmPackage": "typescript-language-server"
+		},
+		{
+			"id": "yaml",
+			"binary": "yaml-language-server",
+			"npmPackage": "yaml-language-server"
+		},
+		{
+			"id": "json",
+			"binary": "vscode-json-language-server",
+			"npmPackage": "vscode-langservers-extracted"
+		},
+		{
+			"id": "html",
+			"binary": "vscode-html-language-server",
+			"npmPackage": "vscode-langservers-extracted"
+		},
+		{
+			"id": "sql",
+			"binary": "sql-language-server",
+			"npmPackage": "sql-language-server"
+		},
+		{ "id": "clangd", "binary": "clangd", "native": true },
+		{ "id": "rust-analyzer", "binary": "rust-analyzer", "native": true },
+		{ "id": "texlab", "binary": "texlab", "native": true }
+	],
+	"evalSkips": [
+		{
+			"id": "pylsp",
+			"contexts": ["trial"],
+			"reason": "benchmark cache uses pyright as the Python LSP; pylsp fallback is not provisioned per trial"
+		},
+		{
+			"id": "r",
+			"contexts": ["trial"],
+			"reason": "terminal-bench-2 has one R file; R languageserver install is too slow for trial provisioning"
+		},
+		{
+			"id": "r",
+			"contexts": ["prewarm"],
+			"reason": "terminal-bench-2 has one R file; R languageserver install is too slow for the shared cache"
+		},
+		{
+			"id": "toml",
+			"contexts": ["trial", "prewarm"],
+			"reason": "terminal-bench-2 TOML files are metadata/config; no warmed LSP needed"
+		},
+		{
+			"id": "cobol",
+			"contexts": ["trial", "prewarm"],
+			"reason": "terminal-bench-2 has one COBOL file; no reliable lightweight LSP prewarm"
+		},
+		{
+			"id": "verilog",
+			"contexts": ["trial", "prewarm"],
+			"reason": "terminal-bench-2 has one Verilog file; no warmed LSP needed"
+		},
+		{
+			"id": "scheme",
+			"contexts": ["trial", "prewarm"],
+			"reason": "benchmark Scheme files are interpreter inputs; no warmed LSP needed"
+		}
+	]
+}

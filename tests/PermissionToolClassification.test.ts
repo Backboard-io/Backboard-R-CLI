@@ -1,0 +1,78 @@
+import { describe, expect, it } from "bun:test";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import {
+	appendAllowRule,
+	loadPermissionSettings,
+} from "../src/core/permissions/settings.ts";
+import { AskUserTool } from "../src/tools/AskUserTool.tsx";
+import { FetchUrlTool } from "../src/tools/FetchUrlTool.tsx";
+import { TodoWriteTool } from "../src/tools/TodoWriteTool.tsx";
+import { WebSearchTool } from "../src/tools/WebSearchTool.tsx";
+
+async function tempProject(): Promise<string> {
+	const dir = await mkdtemp(join(tmpdir(), "q-perm-classification-"));
+	// A .git dir makes findRepoRoot treat the temp dir as the project root.
+	await mkdir(join(dir, ".git"), { recursive: true });
+	return dir;
+}
+
+describe("network tools are not read-only", () => {
+	// FetchUrlTool/WebSearchTool override isReadOnly/isConcurrencySafe with no
+	// parameters (same pattern as TodoWriteTool/AskUserTool), so the concrete
+	// instance type accepts zero arguments here — that narrower signature is
+	// exactly what makes these overrides unconditional regardless of input.
+	it("FetchUrlTool.isReadOnly is false", () => {
+		expect(new FetchUrlTool().isReadOnly()).toBe(false);
+	});
+
+	it("FetchUrlTool.isConcurrencySafe stays true", () => {
+		expect(new FetchUrlTool().isConcurrencySafe()).toBe(true);
+	});
+
+	it("WebSearchTool.isReadOnly is false", () => {
+		expect(new WebSearchTool().isReadOnly()).toBe(false);
+	});
+
+	it("WebSearchTool.isConcurrencySafe stays true", () => {
+		expect(new WebSearchTool().isConcurrencySafe()).toBe(true);
+	});
+});
+
+describe("internal tools never gate on permission", () => {
+	it("TodoWriteTool.checkPermissions allows", () => {
+		const decision = new TodoWriteTool().checkPermissions();
+		expect(decision?.behavior).toBe("allow");
+	});
+
+	it("AskUserTool.checkPermissions allows", () => {
+		const decision = new AskUserTool().checkPermissions();
+		expect(decision?.behavior).toBe("allow");
+	});
+});
+
+describe("appendAllowRule never crashes the turn", () => {
+	it("works normally against a valid, writable project", async () => {
+		const cwd = await tempProject();
+		expect(() => appendAllowRule(cwd, "execute(bun test:*)")).not.toThrow();
+		expect(loadPermissionSettings(cwd).allow).toEqual(["execute(bun test:*)"]);
+	});
+
+	it("swallows failures when the settings dir cannot be created", async () => {
+		// Make a regular file, then use a path *under* it as cwd: mkdirSync of
+		// `<file>/sub/.backboard` fails with ENOTDIR on every platform, no root
+		// needed. (tmpdir has no .git ancestor, so findRepoRoot stays here.)
+		const dir = await mkdtemp(join(tmpdir(), "q-perm-badcwd-"));
+		const filePath = join(dir, "a-file");
+		await writeFile(filePath, "x");
+		const badCwd = join(filePath, "sub");
+		expect(() => appendAllowRule(badCwd, "execute(rm:*)")).not.toThrow();
+		// The failed write must not corrupt anything readable afterwards.
+		expect(loadPermissionSettings(badCwd)).toEqual({
+			allow: [],
+			deny: [],
+			ask: [],
+		});
+	});
+});

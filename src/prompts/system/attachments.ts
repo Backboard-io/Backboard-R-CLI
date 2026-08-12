@@ -1,0 +1,2 @@
+/** Guidance so the model treats `[attached: ...]` markers as uploads, not disk paths. */
+export const ATTACHMENTS_GUIDANCE = `Paths wrapped in [attached: ...] in user messages are uploaded attachments, not workspace files. Their content is already available to you: images are visible directly in the conversation, and documents are indexed for retrieval (use the search_documents tool when available). Do not read attachments from disk or search the workspace for them; only fall back to the absolute path inside the marker if the uploaded content is somehow insufficient.`;

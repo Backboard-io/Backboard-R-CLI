@@ -1,0 +1,50 @@
+{
+	"name": "backboard-r-cli",
+	"version": "3.0.2",
+	"private": true,
+	"license": "MIT",
+	"type": "module",
+	"module": "src/entrypoints/cli.tsx",
+	"bin": {
+		"backboard": "src/entrypoints/cli.tsx"
+	},
+	"scripts": {
+		"dev": "bun run src/entrypoints/cli.tsx",
+		"test:browser-harness": "bun run scripts/test-browser-harness.ts",
+		"test:agent-eval": "bun run scripts/agent-eval.ts",
+		"ep": "bun run scripts/export-prompts.ts",
+		"prepare": "git config core.hooksPath .githooks",
+		"precommit": "bun run validate",
+		"validate": "bun run lint && bun run typecheck && bun test",
+		"build": "bun run scripts/build.ts",
+		"build:release": "bun run scripts/build-release.ts",
+		"typecheck": "bunx tsc --noEmit",
+		"test": "bun test",
+		"lint": "biome check .",
+		"lint:fix": "biome check --write .",
+		"format": "biome format --write .",
+		"format:check": "biome format ."
+	},
+	"dependencies": {
+		"@modelcontextprotocol/sdk": "^1.29.0",
+		"ink": "^7.0.5",
+		"ink-text-input": "^6.0.0",
+		"qrcode": "^1.5.4",
+		"react": "^19.2.0",
+		"react-devtools-core": "^6.1.1",
+		"uri-template": "^2.0.0",
+		"vscode-jsonrpc": "^9.0.0",
+		"vscode-languageserver-protocol": "^3.18.1",
+		"vscode-languageserver-types": "^3.18.0",
+		"yaml": "^2.9.0",
+		"zod": "^3.23.8",
+		"zod-to-json-schema": "^3.23.5"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "^2.5.0",
+		"@types/bun": "^1.1.10",
+		"@types/qrcode": "^1.5.6",
+		"@types/react": "^19.2.0",
+		"typescript": "^5.6.3"
+	}
+}

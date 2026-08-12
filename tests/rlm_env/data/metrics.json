@@ -1,0 +1,26 @@
+[
+	{
+		"name": "checkout_error_rate",
+		"baseline": 0.011,
+		"current": 0.038,
+		"unit": "ratio"
+	},
+	{
+		"name": "checkout_conversion",
+		"baseline": 0.62,
+		"current": 0.49,
+		"unit": "ratio"
+	},
+	{
+		"name": "login_success_rate",
+		"baseline": 0.982,
+		"current": 0.951,
+		"unit": "ratio"
+	},
+	{
+		"name": "support_first_response_minutes",
+		"baseline": 18,
+		"current": 21,
+		"unit": "minutes"
+	}
+]

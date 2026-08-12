@@ -1,0 +1,5 @@
+#!/bin/sh
+set -eu
+
+echo "Running Backboard R-CLI pre-commit checks..."
+bun run precommit

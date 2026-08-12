@@ -22,12 +22,13 @@ export class ByokError extends Error {
 }
 
 export function unexpectedStreamEndMessage(provider: ByokProviderId): string {
-	const label =
-		provider === "anthropic"
-			? "Anthropic"
-			: provider === "openai"
-				? "OpenAI"
-				: "Google";
+	const labels: Record<ByokProviderId, string> = {
+		anthropic: "Anthropic",
+		openai: "OpenAI",
+		google: "Google",
+		openrouter: "OpenRouter",
+	};
+	const label = labels[provider];
 	return `${label} stream closed unexpectedly before a terminal event.`;
 }
 

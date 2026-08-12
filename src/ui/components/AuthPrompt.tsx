@@ -21,7 +21,7 @@ const ACTIONS: Record<AuthPromptSelection, string> = {
 
 const HINTS: Record<AuthPromptSelection, string> = {
 	login: "Full model catalog, memory, and saved conversations",
-	byok: "Anthropic, OpenAI, or Gemini - billed to your own key",
+	byok: "Anthropic, OpenAI, Gemini, or OpenRouter - billed to your key",
 	exit: "",
 };
 

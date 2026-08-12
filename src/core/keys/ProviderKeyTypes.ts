@@ -5,7 +5,12 @@
  * BYOK model and a Backboard-routed model of the same vendor share one
  * `provider/model` string and the `/model` picker can dedupe across sources.
  */
-export const BYOK_PROVIDER_IDS = ["anthropic", "openai", "google"] as const;
+export const BYOK_PROVIDER_IDS = [
+	"anthropic",
+	"openai",
+	"google",
+	"openrouter",
+] as const;
 
 export type ByokProviderId = (typeof BYOK_PROVIDER_IDS)[number];
 

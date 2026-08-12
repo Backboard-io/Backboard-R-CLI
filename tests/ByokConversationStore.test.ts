@@ -62,6 +62,60 @@ function stubAnthropic(text: string): void {
 }
 
 describe("ByokConversationStore", () => {
+	it("preserves opaque provider metadata used by tool continuations", async () => {
+		const cwd = await mkdtemp(path.join(os.tmpdir(), "byok-sessions-"));
+		const session = new SessionStore("sess_metadata", cwd);
+		await session.init({
+			sessionId: "sess_metadata",
+			createdAt: new Date().toISOString(),
+			cwd,
+			model: "openrouter/anthropic/claude-haiku-4.5",
+			profile: "coding",
+		});
+		const store = new ByokConversationStore(cwd);
+		const providerMetadata = JSON.stringify([
+			{ type: "reasoning.encrypted", data: "opaque" },
+		]);
+
+		await store.save(
+			{
+				version: 1,
+				revision: 0,
+				threadId: "byok_metadata",
+				sessionId: "sess_metadata",
+				sessionRoot: session.paths.root,
+				provider: "openrouter",
+				model: "anthropic/claude-haiku-4.5",
+				systemPrompt: "test",
+				createdAt: new Date().toISOString(),
+				updatedAt: new Date().toISOString(),
+				messages: [
+					{ role: "user", content: "call a tool" },
+					{
+						role: "assistant",
+						content: "",
+						toolCalls: [{ id: "call_1", name: "read", input: {} }],
+						providerMetadata,
+					},
+					{
+						role: "tool",
+						results: [{ id: "call_1", name: "read", output: "result" }],
+					},
+				],
+			},
+			0,
+		);
+		const loaded = await store.get("byok_metadata", {
+			repairInterruptedToolTurn: false,
+		});
+
+		expect(
+			loaded?.messages.find((message) => message.role === "assistant"),
+		).toMatchObject({
+			providerMetadata,
+		});
+	});
+
 	it("persists and reloads a top-level BYOK conversation", async () => {
 		const cwd = await mkdtemp(path.join(os.tmpdir(), "byok-sessions-"));
 		const session = new SessionStore("sess_one", cwd);

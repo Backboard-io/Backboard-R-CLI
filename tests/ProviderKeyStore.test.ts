@@ -34,6 +34,16 @@ describe("provider key store", () => {
 		expect(keys.anthropic?.addedAt).toBeString();
 	});
 
+	it("round-trips an OpenRouter key", async () => {
+		const home = await tempHome();
+		await setProviderKey("openrouter", "sk-or-v1-example", home);
+
+		expect(readProviderKeys(home).openrouter).toMatchObject({
+			key: "sk-or-v1-example",
+			enabled: true,
+		});
+	});
+
 	it("writes the key file owner-only", async () => {
 		const home = await tempHome();
 		await setProviderKey("openai", "sk-example", home);

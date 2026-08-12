@@ -24,7 +24,7 @@ interface Props {
 
 /**
  * `/keys`. A flat list with direct-action keys rather than nested menus - there
- * are only three providers and four verbs, so a submenu would cost a keystroke
+ * are only a few providers and four verbs, so a submenu would cost a keystroke
  * and buy nothing.
  */
 export function ProviderKeyManager({

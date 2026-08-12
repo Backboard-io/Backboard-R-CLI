@@ -143,6 +143,7 @@ R-CLI currently supports direct keys for:
 - Anthropic
 - OpenAI
 - Google
+- OpenRouter
 
 Provider keys are validated before saving, encrypted at rest in
 `~/.backboard/keys.json`, and never written to project session logs. Add keys

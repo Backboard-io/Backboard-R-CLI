@@ -108,6 +108,8 @@ function providerLabel(provider: ByokProviderId): string {
 			return "OpenAI";
 		case "google":
 			return "Google";
+		case "openrouter":
+			return "OpenRouter";
 	}
 }
 

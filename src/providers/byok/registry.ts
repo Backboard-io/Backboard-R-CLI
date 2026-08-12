@@ -6,6 +6,7 @@ import {
 import { anthropicAdapter } from "./adapters/AnthropicAdapter.ts";
 import { googleAdapter } from "./adapters/GoogleAdapter.ts";
 import { openaiAdapter } from "./adapters/OpenAIAdapter.ts";
+import { openRouterAdapter } from "./adapters/OpenRouterAdapter.ts";
 import type { ProviderAdapter } from "./ByokTypes.ts";
 
 /**
@@ -17,6 +18,7 @@ export const BYOK_ADAPTERS: Record<ByokProviderId, ProviderAdapter> = {
 	anthropic: anthropicAdapter,
 	openai: openaiAdapter,
 	google: googleAdapter,
+	openrouter: openRouterAdapter,
 };
 
 /** Adapters in a stable display order for pickers. */

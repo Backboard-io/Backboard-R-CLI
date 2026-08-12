@@ -173,7 +173,13 @@ export type ProviderEvent =
 	| { kind: "assistant_delta"; text: string }
 	| { kind: "tool_started"; id: string; name: string }
 	| { kind: "tool_ready"; call: ProviderToolCall }
-	| { kind: "requires_action"; runId: string | null; calls: ProviderToolCall[] }
+	| {
+			kind: "requires_action";
+			runId: string | null;
+			calls: ProviderToolCall[];
+			/** Serialized opaque turn-level provider state needed for continuation. */
+			providerMetadata?: string;
+	  }
 	| { kind: "usage"; usage: ProviderUsage }
 	| { kind: "warning"; message: string }
 	| {

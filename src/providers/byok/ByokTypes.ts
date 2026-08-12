@@ -40,6 +40,8 @@ export type ByokMessage =
 			role: "assistant";
 			content: string;
 			toolCalls: ProviderToolCall[];
+			/** Serialized opaque provider state that must be replayed. */
+			providerMetadata?: string;
 			/** Kept in provider context but omitted from the resumed transcript. */
 			hidden?: boolean;
 	  }
@@ -87,8 +89,12 @@ export interface ProviderAdapter {
 	/** The vendor's chat models, already filtered to ones worth selecting. */
 	listModels(key: string, signal?: AbortSignal): Promise<ModelCatalogItem[]>;
 
-	/** Whether this specific model accepts the provider's thinking controls. */
-	supportsThinking(model: string): boolean;
+	/**
+	 * Whether this specific model accepts the provider's thinking controls.
+	 * Catalog-backed providers may resolve this asynchronously with the active
+	 * key; static providers can return their answer directly.
+	 */
+	supportsThinking(model: string, key: string): boolean | Promise<boolean>;
 
 	/** Streams one assistant turn as the same ProviderEvents Backboard yields. */
 	stream(request: ByokStreamRequest, key: string): AsyncIterable<ProviderEvent>;

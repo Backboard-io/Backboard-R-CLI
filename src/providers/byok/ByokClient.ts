@@ -327,6 +327,7 @@ export class ByokClient implements AgentClient {
 		let terminal = false;
 		let events = 0;
 		let error: string | undefined;
+		let providerMetadata: string | undefined;
 
 		const commit = async (): Promise<string | null> => {
 			if (committed) return null;
@@ -336,6 +337,7 @@ export class ByokClient implements AgentClient {
 					role: "assistant",
 					content: text,
 					toolCalls: calls,
+					...(providerMetadata ? { providerMetadata } : {}),
 				});
 			}
 			const threadId = options.cacheKey;
@@ -378,6 +380,7 @@ export class ByokClient implements AgentClient {
 				}
 				if (event.kind === "requires_action") {
 					terminal = true;
+					providerMetadata = event.providerMetadata;
 					const warning = await commit();
 					if (warning) yield { kind: "warning", message: warning };
 				}
@@ -473,11 +476,7 @@ export class ByokClient implements AgentClient {
 		};
 	}
 
-	/**
-	 * Answered locally. Backboard exposes per-model thinking metadata over HTTP;
-	 * vendors do not, so this reports what the adapter's catalog already knows
-	 * and lets the thinking resolver fall back to its defaults.
-	 */
+	/** Resolve provider-specific thinking support with the active BYOK key. */
 	async getModelThinkingMetadata(
 		provider: string,
 		model: string,
@@ -486,7 +485,9 @@ export class ByokClient implements AgentClient {
 		return {
 			provider,
 			model,
-			supports_thinking: adapter?.supportsThinking(model) ?? false,
+			supports_thinking: adapter
+				? await adapter.supportsThinking(model, this.keyFor(adapter))
+				: false,
 		};
 	}
 

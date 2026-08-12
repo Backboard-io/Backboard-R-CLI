@@ -1,7 +1,10 @@
 import { readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { qSessionDir } from "../../config/paths.ts";
-import type { ByokProviderId } from "../../core/keys/ProviderKeyTypes.ts";
+import {
+	type ByokProviderId,
+	isByokProviderId,
+} from "../../core/keys/ProviderKeyTypes.ts";
 import { acquireFileLease } from "../../utils/FileLease.ts";
 import { ensureDir, renameOver } from "../../utils/fs.ts";
 import {
@@ -273,7 +276,7 @@ function isObject(value: unknown): value is Record<string, unknown> {
 }
 
 function isProvider(value: unknown): value is ByokProviderId {
-	return value === "anthropic" || value === "openai" || value === "google";
+	return typeof value === "string" && isByokProviderId(value);
 }
 
 function isByokMessage(value: unknown): value is ByokMessage {
@@ -293,6 +296,8 @@ function isByokMessage(value: unknown): value is ByokMessage {
 		return (
 			typeof value.content === "string" &&
 			(value.hidden === undefined || typeof value.hidden === "boolean") &&
+			(value.providerMetadata === undefined ||
+				typeof value.providerMetadata === "string") &&
 			Array.isArray(value.toolCalls) &&
 			value.toolCalls.every(
 				(call) =>

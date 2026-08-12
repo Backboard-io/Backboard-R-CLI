@@ -1,0 +1,95 @@
+{
+	"files": [
+		{
+			"path": "src/cart.ts",
+			"text": "import { applyDiscount } from \"./discounts\";\n\nexport interface CartItem {\n  sku: string;\n  unitCents: number;\n  quantity: number;\n  discountCents?: number;\n}\n\nexport function calculateCartTotal(items: CartItem[]): number {\n  return items.reduce((total, item) => {\n    const subtotal = item.unitCents * item.quantity;\n    if (!item.discountCents) return total + subtotal;\n    return total + applyDiscount(subtotal, -item.discountCents);\n  }, 0);\n}\n"
+		},
+		{
+			"path": "src/discounts.ts",
+			"text": "export function applyDiscount(amountCents: number, discountCents: number): number {\n  if (discountCents < 0) {\n    throw new Error(\"discountCents must be positive\");\n  }\n  return Math.max(0, amountCents - discountCents);\n}\n"
+		},
+		{
+			"path": "notes/architecture.md",
+			"text": "# Checkout Architecture\n\nThe checkout service should keep pricing calculations deterministic and side-effect free. Cart totals are calculated client-side for display, then verified server-side before payment capture.\n\nRelease constraints:\n\n- No schema migrations in the checkout hotfix window.\n- Checkout error rate must remain below 1.5%.\n- Support should receive a rollback note for any payment or pricing change.\n"
+		},
+		{
+			"path": "notes/release-plan.md",
+			"text": "# Release Plan\n\n1. Patch cart discount handling.\n2. Add a database migration for coupon audit events.\n3. Run checkout smoke tests.\n4. Ship behind the existing checkout-hotfix flag.\n5. Notify support after deployment.\n"
+		}
+	],
+	"tickets": [
+		{
+			"id": "TCK-101",
+			"title": "Users cannot log in after password reset",
+			"area": "auth",
+			"severity": 4,
+			"affectedUsers": 320,
+			"revenueImpact": false,
+			"createdHoursAgo": 6
+		},
+		{
+			"id": "TCK-102",
+			"title": "Typo in upgrade modal headline",
+			"area": "billing",
+			"severity": 1,
+			"affectedUsers": 900,
+			"revenueImpact": false,
+			"createdHoursAgo": 18
+		},
+		{
+			"id": "TCK-103",
+			"title": "Checkout fails when discounted item is in cart",
+			"area": "checkout",
+			"severity": 5,
+			"affectedUsers": 180,
+			"revenueImpact": true,
+			"createdHoursAgo": 2
+		},
+		{
+			"id": "TCK-104",
+			"title": "Export CSV timezone label is confusing",
+			"area": "reports",
+			"severity": 2,
+			"affectedUsers": 44,
+			"revenueImpact": false,
+			"createdHoursAgo": 48
+		}
+	],
+	"metrics": [
+		{
+			"name": "checkout_error_rate",
+			"baseline": 0.011,
+			"current": 0.038,
+			"unit": "ratio"
+		},
+		{
+			"name": "checkout_conversion",
+			"baseline": 0.62,
+			"current": 0.49,
+			"unit": "ratio"
+		},
+		{
+			"name": "login_success_rate",
+			"baseline": 0.982,
+			"current": 0.951,
+			"unit": "ratio"
+		},
+		{
+			"name": "support_first_response_minutes",
+			"baseline": 18,
+			"current": 21,
+			"unit": "minutes"
+		}
+	],
+	"constraints": {
+		"hotfixWindowHours": 4,
+		"schemaMigrationsAllowed": false,
+		"checkoutErrorRateMax": 0.015,
+		"requiresSupportRollbackNote": true
+	},
+	"releasePlan": "Patch cart discount handling, add a database migration for coupon audit events, run checkout smoke tests, ship behind checkout-hotfix, notify support after deployment.",
+	"context": {
+		"label": "fixture context value that must remain under inputs.context",
+		"purpose": "reserved binding collision test"
+	}
+}

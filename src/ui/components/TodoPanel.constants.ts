@@ -1,0 +1,6 @@
+export const TODO_PANEL_MAX_ITEMS = 12;
+export const TODO_PANEL_MEDIUM_ITEMS = 6;
+export const TODO_PANEL_SHORT_ITEMS = 3;
+export const TODO_PANEL_COMPACT_HEIGHT = 20;
+export const TODO_PANEL_SHORT_HEIGHT = 28;
+export const TODO_PANEL_MEDIUM_HEIGHT = 36;

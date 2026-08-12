@@ -1,0 +1,3 @@
+export const SPINNER_SHADOW_INTERVAL_MS = 140;
+export const SPINNER_SHADOW_GAP_FRAMES = 1;
+export const SPINNER_SHADOW_WIDTH = 6;

@@ -1,0 +1,1 @@
+export const MAX_SUBAGENT_TOOL_ROUNDS = 20;

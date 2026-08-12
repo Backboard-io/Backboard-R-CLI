@@ -1095,7 +1095,7 @@ remote body
 });
 
 async function tempDir(): Promise<string> {
-	return mkdtemp(path.join(os.tmpdir(), "q-cli-skills-"));
+	return mkdtemp(path.join(os.tmpdir(), "cli-skills-"));
 }
 
 function findSkillItem(

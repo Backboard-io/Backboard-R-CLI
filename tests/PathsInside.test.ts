@@ -12,8 +12,8 @@ describe("pathsInsideCwd", () => {
 	});
 
 	it("rejects a path that traverses a symlink pointing outside cwd", async () => {
-		const root = await mkdtemp(join(tmpdir(), "q-cwd-"));
-		const outside = await mkdtemp(join(tmpdir(), "q-outside-"));
+		const root = await mkdtemp(join(tmpdir(), "cwd-"));
+		const outside = await mkdtemp(join(tmpdir(), "outside-"));
 		await writeFile(join(outside, "secret.txt"), "x");
 		// A symlink inside cwd pointing outside: `link` is lexically inside cwd.
 		await symlink(outside, join(root, "link"));

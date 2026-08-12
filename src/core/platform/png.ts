@@ -9,7 +9,7 @@ export async function resizeWithCandidates(
 	input: ResizePngInput,
 	resize: (width: number, out: string) => Promise<void>,
 ): Promise<ImagePayload | null> {
-	const dir = await mkdtemp(join(tmpdir(), "q-cua-image-"));
+	const dir = await mkdtemp(join(tmpdir(), "cua-image-"));
 	try {
 		let smallest: ImagePayload | null = null;
 		for (const width of RESIZE_WIDTHS) {

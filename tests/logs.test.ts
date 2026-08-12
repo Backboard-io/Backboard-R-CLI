@@ -10,7 +10,7 @@ import { SessionStore } from "../src/core/session/SessionStore.ts";
 let dir: string;
 
 beforeEach(async () => {
-	dir = await mkdtemp(join(tmpdir(), "q-test-"));
+	dir = await mkdtemp(join(tmpdir(), "test-"));
 });
 
 afterEach(async () => {

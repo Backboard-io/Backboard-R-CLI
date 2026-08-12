@@ -45,7 +45,7 @@ class MutatingTool extends Tool<Input, null> {
 }
 
 async function tempProject(): Promise<string> {
-	const dir = await mkdtemp(join(tmpdir(), "q-perm-resolve-"));
+	const dir = await mkdtemp(join(tmpdir(), "perm-resolve-"));
 	await mkdir(join(dir, ".git"), { recursive: true });
 	return dir;
 }

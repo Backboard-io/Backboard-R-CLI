@@ -4,12 +4,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BrowserSessionManager } from "../src/core/browser/BrowserSessionManager.ts";
 
-const screenshotDir = await mkdtemp(join(tmpdir(), "q-browser-smoke-"));
+const screenshotDir = await mkdtemp(join(tmpdir(), "browser-smoke-"));
 const manager = new BrowserSessionManager({
 	env: {
 		...process.env,
-		Q_BROWSER_CDP_URL: undefined,
-		Q_BROWSER_WS_URL: undefined,
+		BROWSER_CDP_URL: undefined,
+		BROWSER_WS_URL: undefined,
 	},
 });
 

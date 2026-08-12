@@ -1,10 +1,10 @@
 type Level = "debug" | "info" | "warn" | "error";
 
-const ENABLED = process.env.Q_DEBUG === "1" || process.env.Q_DEBUG === "true";
+const ENABLED = process.env.DEBUG === "1" || process.env.DEBUG === "true";
 
 /**
  * Writes to stderr only. Stdout is owned by the Ink renderer, so logging there
- * would corrupt the TUI. Disabled unless Q_DEBUG is set.
+ * would corrupt the TUI. Disabled unless DEBUG is set.
  */
 function emit(level: Level, args: unknown[]): void {
 	if (!ENABLED) return;

@@ -46,7 +46,7 @@ export async function findBrowserExecutable(
 	const canExecute = options.canExecute ?? isExecutable;
 
 	const explicit = [
-		{ name: "Q_BROWSER_PATH", value: env.browserPath },
+		{ name: "BROWSER_PATH", value: env.browserPath },
 		{ name: "CHROME_PATH", value: env.chromePath },
 	];
 	for (const item of explicit) {
@@ -77,7 +77,7 @@ export async function findBrowserExecutable(
 	}
 
 	throw new Error(
-		"Could not find Chrome, Edge, or another Chromium browser. Install Chrome or set Q_BROWSER_PATH to a browser executable.",
+		"Could not find Chrome, Edge, or another Chromium browser. Install Chrome or set BROWSER_PATH to a browser executable.",
 	);
 }
 

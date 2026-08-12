@@ -400,7 +400,7 @@ describe("ComputerTool", () => {
 
 	it("compresses oversized PNG screenshots before payload encoding", async () => {
 		if (process.platform !== "darwin") return;
-		const dir = await mkdtemp(join(tmpdir(), "q-cua-test-"));
+		const dir = await mkdtemp(join(tmpdir(), "cua-test-"));
 		tempDirs.push(dir);
 		const path = join(dir, "screen.png");
 		const bytes = tinyPng();

@@ -77,7 +77,7 @@ describe("BrowserHarnessPlatform", () => {
 	it("captures screenshots and maps DOM elements to screenshot coordinates", async () => {
 		const client = new FakeBrowserClient();
 		const platform = new BrowserHarnessPlatform(client);
-		const dir = await mkdtemp(join(tmpdir(), "q-browser-platform-"));
+		const dir = await mkdtemp(join(tmpdir(), "browser-platform-"));
 		tempDirs.push(dir);
 
 		const shot = await platform.screenshot(
@@ -101,7 +101,7 @@ describe("BrowserHarnessPlatform", () => {
 	it("dispatches browser navigation, typing, keys, and scaled clicks", async () => {
 		const client = new FakeBrowserClient();
 		const platform = new BrowserHarnessPlatform(client);
-		const dir = await mkdtemp(join(tmpdir(), "q-browser-platform-"));
+		const dir = await mkdtemp(join(tmpdir(), "browser-platform-"));
 		tempDirs.push(dir);
 		await platform.screenshot(
 			join(dir, "screen.png"),

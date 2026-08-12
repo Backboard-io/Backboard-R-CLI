@@ -175,7 +175,7 @@ describe("lsp binary resolution", () => {
 			{
 				enabled: true,
 				allowDownload: false,
-				cacheDir: "/tmp/q-cli-missing-lsp-cache",
+				cacheDir: "/tmp/cli-missing-lsp-cache",
 			},
 		);
 
@@ -187,7 +187,7 @@ describe("lsp binary resolution", () => {
 	});
 
 	it("resolves install strategies in order from the cache", async () => {
-		const dir = await mkdtemp(join(tmpdir(), "q-cli-lsp-cache-"));
+		const dir = await mkdtemp(join(tmpdir(), "cli-lsp-cache-"));
 		const binDir = join(dir, "bin");
 		const bin = join(binDir, "cached-lsp");
 		await mkdir(binDir, { recursive: true });
@@ -206,7 +206,7 @@ describe("lsp binary resolution", () => {
 	});
 
 	it("reports disabled command installers without running them", async () => {
-		const dir = await mkdtemp(join(tmpdir(), "q-cli-lsp-installer-"));
+		const dir = await mkdtemp(join(tmpdir(), "cli-lsp-installer-"));
 		const result = await resolveWithStrategies(
 			{
 				serverId: "native",
@@ -233,7 +233,7 @@ describe("lsp binary resolution", () => {
 
 describe("lsp service end-to-end with a fake server", () => {
 	it("collects diagnostics for a touched file", async () => {
-		const dir = await mkdtemp(join(tmpdir(), "q-cli-lsp-"));
+		const dir = await mkdtemp(join(tmpdir(), "cli-lsp-"));
 		const file = join(dir, "sample.fake");
 		await writeFile(file, "broken code\n", "utf8");
 
@@ -255,7 +255,7 @@ describe("lsp service end-to-end with a fake server", () => {
 	});
 
 	it("is a no-op when disabled", async () => {
-		const dir = await mkdtemp(join(tmpdir(), "q-cli-lsp-"));
+		const dir = await mkdtemp(join(tmpdir(), "cli-lsp-"));
 		const service = new LspService({
 			directory: dir,
 			flags: { enabled: false, allowDownload: false, cacheDir: dir },
@@ -269,7 +269,7 @@ describe("lsp service end-to-end with a fake server", () => {
 	});
 
 	it("records and warns once when a matching server is unavailable", async () => {
-		const dir = await mkdtemp(join(tmpdir(), "q-cli-lsp-missing-"));
+		const dir = await mkdtemp(join(tmpdir(), "cli-lsp-missing-"));
 		const file = join(dir, "sample.missing");
 		await writeFile(file, "broken code\n", "utf8");
 		const warnings: string[] = [];
@@ -301,7 +301,7 @@ describe("lsp service end-to-end with a fake server", () => {
 
 describe("edit tool diagnostics feedback", () => {
 	it("appends an LSP error block to the model output after editing", async () => {
-		const dir = await mkdtemp(join(tmpdir(), "q-cli-lsp-edit-"));
+		const dir = await mkdtemp(join(tmpdir(), "cli-lsp-edit-"));
 		await writeFile(join(dir, "sample.fake"), "alpha\n", "utf8");
 		const service = new LspService({
 			directory: dir,

@@ -9,7 +9,11 @@ import { BackboardError } from "../../providers/backboard/errors.ts";
 import { errorMessage } from "../../utils/errors.ts";
 import { shortId } from "../../utils/id.ts";
 import type { EventBus } from "../bus/EventBus.ts";
-import type { AskUserQuestionSpec, TurnStatus } from "../bus/events.ts";
+import type {
+	AskUserQuestionSpec,
+	TodoItem,
+	TurnStatus,
+} from "../bus/events.ts";
 import type { CheckpointRecorder } from "../checkpoints/CheckpointStore.ts";
 import {
 	AUTO_COMPACT_THRESHOLD_PERCENT,
@@ -291,6 +295,7 @@ export class AgentController {
 			const hookController = this.deps.hookController;
 
 			bus.emit({ type: "turn:start", turnId: turn.id });
+			const turnStartTodos = [...session.todos];
 
 			let promptHook: UserPromptHookResult | undefined;
 			if (hookController?.hasTrustedUserPromptHooks()) {
@@ -314,7 +319,7 @@ export class AgentController {
 			session.addMessage(userMessage(text));
 			turnStarted = true;
 
-			const ctx = this.buildContext(signal);
+			const ctx = this.buildContext(signal, turnStartTodos);
 			// All four are independent of each other: assistant resolution and
 			// thinking metadata are network round-trips, the skill scan reads
 			// only the skill catalog + filesystem, and the tool sync talks to
@@ -624,7 +629,10 @@ export class AgentController {
 		}
 	}
 
-	private buildContext(signal: AbortSignal): ToolContext {
+	private buildContext(
+		signal: AbortSignal,
+		turnStartTodos: readonly TodoItem[],
+	): ToolContext {
 		const durable = this.deps.getDurableSession?.();
 		return {
 			sessionId: durable?.sessionId ?? this.deps.session.sessionId,
@@ -637,6 +645,7 @@ export class AgentController {
 				),
 			askQuestions: (questions) => this.askQuestions(questions, signal),
 			getTodos: () => this.deps.session.todos,
+			getTurnStartTodos: () => turnStartTodos,
 			agentDepth: 0,
 			lsp: this.deps.lsp,
 			checkpoints: this.deps.checkpoints,

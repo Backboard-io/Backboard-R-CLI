@@ -47,6 +47,8 @@ export interface ToolContext {
 	 */
 	askQuestions?: AskQuestionsFn;
 	getTodos?: () => readonly TodoItem[];
+	/** Todo state captured before the current user turn began. */
+	getTurnStartTodos?: () => readonly TodoItem[];
 	agentDepth?: number;
 	trace?: ToolTraceContext;
 	/** Optional language-server service for post-edit diagnostics. */

@@ -1,6 +1,10 @@
 import { describe, expect, it } from "bun:test";
 import { EventBus } from "../src/core/bus/EventBus.ts";
-import { assistantMessage, userMessage } from "../src/core/session/Message.ts";
+import {
+	assistantMessage,
+	toolMessage,
+	userMessage,
+} from "../src/core/session/Message.ts";
 import { Session } from "../src/core/session/Session.ts";
 
 describe("Session", () => {
@@ -117,6 +121,14 @@ describe("Session", () => {
 						},
 					},
 				]),
+				toolMessage([
+					{
+						toolCallId: "call_2",
+						name: "todo_write",
+						output: "Updated 2 todos",
+						isError: false,
+					},
+				]),
 			],
 		});
 		expect(
@@ -147,8 +159,73 @@ describe("Session", () => {
 						},
 					},
 				]),
+				toolMessage([
+					{
+						toolCallId: "call_1",
+						name: "todo_write",
+						output: "Updated 2 todos",
+						isError: false,
+					},
+				]),
 			],
 		});
+		expect(session.todos).toEqual([]);
+	});
+
+	it("does not hydrate a TodoWrite call without a matching result", () => {
+		const session = new Session("sess_test");
+		session.hydrate({
+			threadId: "thread_1",
+			messages: [
+				assistantMessage("planning", [
+					{
+						id: "call_1",
+						name: "todo_write",
+						input: {
+							todos: [{ content: "Never executed", status: "pending" }],
+						},
+					},
+				]),
+			],
+		});
+
+		expect(session.todos).toEqual([]);
+	});
+
+	it("finds a TodoWrite result across consecutive tool messages", () => {
+		const session = new Session("sess_test");
+		session.hydrate({
+			threadId: "thread_1",
+			messages: [
+				assistantMessage("planning", [
+					{ id: "call_read", name: "read", input: {} },
+					{
+						id: "call_todo",
+						name: "todo_write",
+						input: {
+							todos: [{ content: "Never applied", status: "pending" }],
+						},
+					},
+				]),
+				toolMessage([
+					{
+						toolCallId: "call_read",
+						name: "read",
+						output: "ok",
+						isError: false,
+					},
+				]),
+				toolMessage([
+					{
+						toolCallId: "call_todo",
+						name: "todo_write",
+						output: "Error: invalid arguments",
+						isError: true,
+					},
+				]),
+			],
+		});
+
 		expect(session.todos).toEqual([]);
 	});
 
@@ -163,6 +240,70 @@ describe("Session", () => {
 			],
 		});
 		expect(session.todos).toEqual([]);
+	});
+
+	it("does not hydrate a TodoWrite call whose tool result failed", () => {
+		const session = new Session("sess_test");
+		session.hydrate({
+			threadId: "thread_1",
+			messages: [
+				assistantMessage("planning", [
+					{
+						id: "call_1",
+						name: "todo_write",
+						input: {
+							todos: [{ content: "Never applied", status: "pending" }],
+						},
+					},
+				]),
+				toolMessage([
+					{
+						toolCallId: "call_1",
+						name: "todo_write",
+						output: "Error: invalid arguments",
+						isError: true,
+					},
+				]),
+			],
+		});
+
+		expect(session.todos).toEqual([]);
+	});
+
+	it("normalizes successful TodoWrite state while hydrating", () => {
+		const session = new Session("sess_test");
+		session.hydrate({
+			threadId: "thread_1",
+			messages: [
+				assistantMessage("planning", [
+					{
+						id: "call_1",
+						name: "todo_write",
+						input: {
+							todos: [
+								{ content: "First", status: "pending" },
+								{ content: "Second", status: "pending" },
+							],
+						},
+					},
+				]),
+				toolMessage([
+					{
+						toolCallId: "call_1",
+						name: "todo_write",
+						output: "Updated 2 todos",
+						isError: false,
+					},
+				]),
+			],
+		});
+
+		expect(
+			session.todos.map(({ content, status }) => ({ content, status })),
+		).toEqual([
+			{ content: "First", status: "in_progress" },
+			{ content: "Second", status: "pending" },
+		]);
 	});
 
 	it("clears a stale provider context limit when hydrating another thread", () => {

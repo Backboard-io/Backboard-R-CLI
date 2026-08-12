@@ -65,28 +65,115 @@ describe("TodoWriteTool", () => {
 		).toThrow();
 	});
 
-	it("rejects multiple in-progress todos", () => {
+	it("keeps only the first in-progress todo", async () => {
 		const tool = new TodoWriteTool();
+		let emittedTodos: TodoItem[] = [];
+		const ctx = makeContext(new AbortController().signal);
+		ctx.bus.on("todos:updated", (event) => {
+			emittedTodos = event.todos;
+		});
 
-		expect(() =>
-			tool.parseInput({
-				todos: [
-					{ content: "One", status: "in_progress" },
-					{ content: "Two", status: "in_progress" },
-				],
-			}),
-		).toThrow("TodoWrite accepts at most one in_progress todo.");
+		const input = tool.parseInput({
+			todos: [
+				{ content: "One", status: "in_progress" },
+				{ content: "Two", status: "in_progress" },
+			],
+		});
+		await tool.execute(input, ctx);
+
+		expect(
+			emittedTodos.map(({ content, status }) => ({ content, status })),
+		).toEqual([
+			{ content: "One", status: "in_progress" },
+			{ content: "Two", status: "pending" },
+		]);
 	});
 
-	it("rejects pending todos without an in-progress todo", () => {
+	it("promotes the first pending todo when none is in progress", async () => {
 		const tool = new TodoWriteTool();
+		let emittedTodos: TodoItem[] = [];
+		const ctx = makeContext(new AbortController().signal);
+		ctx.bus.on("todos:updated", (event) => {
+			emittedTodos = event.todos;
+		});
 
-		expect(() =>
-			tool.parseInput({
-				todos: [{ content: "One", status: "pending" }],
-			}),
-		).toThrow(
-			"TodoWrite requires one in_progress todo when pending todos remain.",
-		);
+		const input = tool.parseInput({
+			todos: [
+				{ content: "One", status: "pending" },
+				{ content: "Two", status: "pending" },
+			],
+		});
+		await tool.execute(input, ctx);
+
+		expect(
+			emittedTodos.map(({ content, status }) => ({ content, status })),
+		).toEqual([
+			{ content: "One", status: "in_progress" },
+			{ content: "Two", status: "pending" },
+		]);
+	});
+
+	it("keeps a newly introduced completed todo active", async () => {
+		const tool = new TodoWriteTool();
+		let emittedTodos: TodoItem[] = [];
+		const ctx = makeContext(new AbortController().signal);
+		ctx.bus.on("todos:updated", (event) => {
+			emittedTodos = event.todos;
+		});
+
+		const input = tool.parseInput({
+			todos: [{ content: "Count to 5", status: "completed" }],
+		});
+		await tool.execute(input, ctx);
+
+		expect(emittedTodos).toMatchObject([
+			{ content: "Count to 5", status: "in_progress" },
+		]);
+	});
+
+	it("allows an existing todo to transition to completed", async () => {
+		const tool = new TodoWriteTool();
+		const previousTodos: TodoItem[] = [
+			{ id: "todo_existing", content: "Count to 5", status: "in_progress" },
+		];
+		let emittedTodos: TodoItem[] = [];
+		const ctx = makeContext(new AbortController().signal);
+		ctx.getTodos = () => previousTodos;
+		ctx.getTurnStartTodos = () => previousTodos;
+		ctx.bus.on("todos:updated", (event) => {
+			emittedTodos = event.todos;
+		});
+
+		const input = tool.parseInput({
+			todos: [{ content: "Count to 5", status: "completed" }],
+		});
+		await tool.execute(input, ctx);
+
+		expect(emittedTodos).toEqual([
+			{ id: "todo_existing", content: "Count to 5", status: "completed" },
+		]);
+	});
+
+	it("blocks completion of a todo introduced earlier in the same turn", async () => {
+		const tool = new TodoWriteTool();
+		const currentTodos: TodoItem[] = [
+			{ id: "todo_new", content: "Count to 5", status: "in_progress" },
+		];
+		let emittedTodos: TodoItem[] = [];
+		const ctx = makeContext(new AbortController().signal);
+		ctx.getTodos = () => currentTodos;
+		ctx.getTurnStartTodos = () => [];
+		ctx.bus.on("todos:updated", (event) => {
+			emittedTodos = event.todos;
+		});
+
+		const input = tool.parseInput({
+			todos: [{ content: "Count to 5", status: "completed" }],
+		});
+		await tool.execute(input, ctx);
+
+		expect(emittedTodos).toEqual([
+			{ id: "todo_new", content: "Count to 5", status: "in_progress" },
+		]);
 	});
 });

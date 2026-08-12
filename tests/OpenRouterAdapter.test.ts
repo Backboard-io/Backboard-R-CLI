@@ -55,6 +55,17 @@ function stubStreams(scripts: string[][]): CapturedRequest[] {
 	const captured: CapturedRequest[] = [];
 	let call = 0;
 	globalThis.fetch = (async (url: string, init?: RequestInit) => {
+		if (String(url).endsWith("/models/user") && init?.method !== "POST") {
+			return Response.json({
+				data: [
+					{
+						id: "anthropic/claude-sonnet-4.6",
+						context_length: 200_000,
+						supported_parameters: ["tools", "reasoning"],
+					},
+				],
+			});
+		}
 		if (typeof init?.body !== "string") {
 			throw new Error("Expected a JSON request body.");
 		}
@@ -87,10 +98,8 @@ async function collect(
 	return events;
 }
 
-function client(): ByokClient {
-	return new ByokClient((provider) =>
-		provider === "openrouter" ? "sk-or-v1-test-key-value-long-enough" : null,
-	);
+function client(key = "sk-or-v1-test-key-value-long-enough"): ByokClient {
+	return new ByokClient((provider) => (provider === "openrouter" ? key : null));
 }
 
 function request(): SendMessageRequest {
@@ -305,6 +314,44 @@ describe("OpenRouter catalog", () => {
 		expect(captured).toHaveLength(1);
 	});
 
+	it("does not cancel a shared catalog load when one caller aborts", async () => {
+		const captured: CapturedRequest[] = [];
+		let resolveResponse: ((response: Response) => void) | undefined;
+		globalThis.fetch = (async (url: string, init?: RequestInit) => {
+			captured.push({
+				url: String(url),
+				headers: (init?.headers ?? {}) as Record<string, string>,
+				body: {},
+			});
+			return await new Promise<Response>((resolve) => {
+				resolveResponse = resolve;
+			});
+		}) as unknown as typeof fetch;
+		const key = "sk-or-v1-abort-test-key-value-long-enough";
+		const controller = new AbortController();
+
+		const modelsPromise = openRouterAdapter.listModels(key, controller.signal);
+		const thinkingPromise = openRouterAdapter.supportsThinking(
+			"openai/gpt-oss-20b:free",
+			key,
+		);
+		controller.abort();
+		resolveResponse?.(
+			Response.json({
+				data: [
+					{
+						id: "openai/gpt-oss-20b:free",
+						supported_parameters: ["tools", "reasoning"],
+					},
+				],
+			}),
+		);
+
+		await expect(modelsPromise).rejects.toBeDefined();
+		await expect(thinkingPromise).resolves.toBe(true);
+		expect(captured).toHaveLength(1);
+	});
+
 	it("requires tools and text output for coding-agent models", () => {
 		expect(
 			isOpenRouterChatModel({
@@ -397,8 +444,132 @@ describe("OpenRouter streaming", () => {
 				cachedTokens: 40,
 				costUsd: 0.0012,
 				provider: "openrouter",
+				contextLimit: 200_000,
 			},
 		});
+	});
+
+	it("omits reasoning for an empty provider-default config", async () => {
+		const captured = stubStreams([finalTurn()]);
+		const input = request();
+		input.thinking = {};
+
+		await collect(client().runMessage(input));
+
+		expect(captured[0]?.body.reasoning).toBeUndefined();
+	});
+
+	it("does not delay a completed turn for a slow catalog lookup", async () => {
+		let catalogRequested = false;
+		globalThis.fetch = (async (url: string, init?: RequestInit) => {
+			if (String(url).endsWith("/models/user")) {
+				catalogRequested = true;
+				return await new Promise<Response>(() => {});
+			}
+			if (typeof init?.body !== "string") {
+				throw new Error("Expected a JSON request body.");
+			}
+			return new Response(
+				new ReadableStream({
+					start(controller) {
+						controller.enqueue(
+							new TextEncoder().encode(
+								`data: ${JSON.stringify({
+									choices: [
+										{
+											delta: { content: "Done." },
+											finish_reason: "stop",
+										},
+									],
+								})}\n\n`,
+							),
+						);
+						controller.enqueue(new TextEncoder().encode("data: [DONE]\n\n"));
+						controller.close();
+					},
+				}),
+			);
+		}) as unknown as typeof fetch;
+
+		const events = await collect(
+			client("sk-or-v1-slow-catalog-test-key-value-long-enough").runMessage(
+				request(),
+			),
+		);
+
+		expect(catalogRequested).toBe(true);
+		expect(events.at(-1)).toMatchObject({ kind: "completed" });
+	});
+
+	it("merges unindexed reasoning fragments by stable stream position", async () => {
+		const captured = stubStreams([
+			[
+				JSON.stringify({
+					choices: [
+						{
+							delta: {
+								reasoning_details: [
+									{
+										type: "reasoning.text",
+										text: "opaque ",
+										format: "anthropic-claude-v1",
+									},
+								],
+								tool_calls: [
+									{
+										index: 0,
+										id: "call_1",
+										function: {
+											name: "read_file",
+											arguments: '{"path":"a.ts"}',
+										},
+									},
+								],
+							},
+							finish_reason: null,
+						},
+					],
+				}),
+				JSON.stringify({
+					choices: [
+						{
+							delta: {
+								reasoning_details: [
+									{
+										type: "reasoning.text",
+										text: "reasoning",
+										signature: "opaque-signature",
+										format: "anthropic-claude-v1",
+									},
+								],
+							},
+							finish_reason: null,
+						},
+					],
+				}),
+				JSON.stringify({
+					choices: [{ delta: {}, finish_reason: "tool_calls" }],
+				}),
+				"[DONE]",
+			],
+		]);
+
+		const events = await collect(client().runMessage(request()));
+		const action = events.find((event) => event.kind === "requires_action");
+
+		expect(captured).toHaveLength(1);
+		expect(
+			action?.kind === "requires_action"
+				? JSON.parse(action.providerMetadata ?? "")
+				: null,
+		).toEqual([
+			{
+				type: "reasoning.text",
+				text: "opaque reasoning",
+				format: "anthropic-claude-v1",
+				signature: "opaque-signature",
+			},
+		]);
 	});
 
 	it("replays reasoning details across a tool continuation", async () => {

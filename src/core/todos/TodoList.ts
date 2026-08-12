@@ -9,7 +9,9 @@ import type { TodoDraft } from "./types.ts";
  * more than one. Keep the provider contract forgiving while making the stored
  * UI state deterministic: pending work always has exactly one active item.
  */
-export function normalizeTodoDrafts(drafts: readonly TodoDraft[]): TodoDraft[] {
+export function normalizeTodoDrafts<T extends TodoDraft>(
+	drafts: readonly T[],
+): T[] {
 	const normalized = drafts.map((draft) => ({ ...draft }));
 	const activeIndexes = normalized.flatMap((todo, index) =>
 		todo.status === "in_progress" ? [index] : [],
@@ -128,8 +130,5 @@ function todoItemsFromInput(input: unknown): TodoItem[] {
 			continue;
 		todos.push({ id: shortId("todo"), content, status });
 	}
-	return normalizeTodoDrafts(todos).map((todo) => ({
-		id: shortId("todo"),
-		...todo,
-	}));
+	return normalizeTodoDrafts(todos);
 }

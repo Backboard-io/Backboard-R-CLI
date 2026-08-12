@@ -73,9 +73,8 @@ export class TodoWriteTool extends Tool<Input, Output> {
 		ctx: ToolContext,
 	): Promise<ToolResult<Output>> {
 		const previousTodos = ctx.getTodos?.() ?? [];
-		const completableTodos = ctx.getTurnStartTodos?.() ?? previousTodos;
 		const todos: TodoItem[] = reconcileTodos(
-			normalizeTodoUpdate(input.todos, completableTodos),
+			normalizeTodoUpdate(input.todos, previousTodos),
 			previousTodos,
 		);
 

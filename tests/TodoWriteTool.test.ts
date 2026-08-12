@@ -139,7 +139,6 @@ describe("TodoWriteTool", () => {
 		let emittedTodos: TodoItem[] = [];
 		const ctx = makeContext(new AbortController().signal);
 		ctx.getTodos = () => previousTodos;
-		ctx.getTurnStartTodos = () => previousTodos;
 		ctx.bus.on("todos:updated", (event) => {
 			emittedTodos = event.todos;
 		});
@@ -154,7 +153,7 @@ describe("TodoWriteTool", () => {
 		]);
 	});
 
-	it("blocks completion of a todo introduced earlier in the same turn", async () => {
+	it("allows completion of a todo introduced earlier in the same turn", async () => {
 		const tool = new TodoWriteTool();
 		const currentTodos: TodoItem[] = [
 			{ id: "todo_new", content: "Count to 5", status: "in_progress" },
@@ -162,7 +161,6 @@ describe("TodoWriteTool", () => {
 		let emittedTodos: TodoItem[] = [];
 		const ctx = makeContext(new AbortController().signal);
 		ctx.getTodos = () => currentTodos;
-		ctx.getTurnStartTodos = () => [];
 		ctx.bus.on("todos:updated", (event) => {
 			emittedTodos = event.todos;
 		});
@@ -173,7 +171,7 @@ describe("TodoWriteTool", () => {
 		await tool.execute(input, ctx);
 
 		expect(emittedTodos).toEqual([
-			{ id: "todo_new", content: "Count to 5", status: "in_progress" },
+			{ id: "todo_new", content: "Count to 5", status: "completed" },
 		]);
 	});
 });

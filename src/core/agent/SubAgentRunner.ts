@@ -34,7 +34,6 @@ export class SubAgentRunner {
 		const bus = new EventBus();
 		const session = new Session(shortId("subagent"));
 		const detachSessionProjection = session.attach(bus);
-		const turnStartTodos = [...session.todos];
 		const childLog = params.trace
 			? new ClientEventLog(params.trace.sessionId, params.trace.clientLogPath)
 			: null;
@@ -99,7 +98,6 @@ export class SubAgentRunner {
 				throw new Error("A sub-agent cannot ask the user a question.");
 			},
 			getTodos: () => session.todos,
-			getTurnStartTodos: () => turnStartTodos,
 			agentDepth: params.depth,
 			trace: params.trace?.context,
 			lsp: this.deps.lsp,

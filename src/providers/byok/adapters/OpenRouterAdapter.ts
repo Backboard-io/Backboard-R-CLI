@@ -77,7 +77,7 @@ export const openRouterAdapter: ProviderAdapter = {
 	},
 
 	async listModels(key, signal) {
-		return (await loadCatalog(key, signal)).models;
+		return (await waitForSignal(loadCatalog(key), signal)).models;
 	},
 
 	async supportsThinking(model, key) {
@@ -120,6 +120,14 @@ async function* streamOpenRouter(
 	request: ByokStreamRequest,
 	key: string,
 ): AsyncIterable<ProviderEvent> {
+	const modelMetadata: { value: ModelCatalogItem | null } = { value: null };
+	void loadCatalog(key)
+		.then((catalog) => {
+			modelMetadata.value =
+				catalog.models.find((candidate) => candidate.name === request.model) ??
+				null;
+		})
+		.catch(() => {});
 	const body: Record<string, unknown> = {
 		model: request.model,
 		messages: toOpenRouterMessages(request),
@@ -251,10 +259,12 @@ async function* streamOpenRouter(
 		yield { kind: "tool_ready", call };
 	}
 
+	const contextLimit = modelMetadata.value?.context_limit ?? null;
 	const finalUsage = {
 		...usage,
 		provider: "openrouter",
 		model: request.model,
+		...(contextLimit ? { contextLimit } : {}),
 	};
 	if (calls.length > 0) {
 		yield { kind: "usage", usage: finalUsage };
@@ -286,10 +296,7 @@ function supportsReasoningParameter(
 	);
 }
 
-async function loadCatalog(
-	key: string,
-	signal?: AbortSignal,
-): Promise<OpenRouterCatalog> {
+async function loadCatalog(key: string): Promise<OpenRouterCatalog> {
 	const normalizedKey = key.trim();
 	const credentialId = createHash("sha256").update(normalizedKey).digest("hex");
 	if (cachedCatalog?.credentialId === credentialId) {
@@ -299,7 +306,7 @@ async function loadCatalog(
 		if (cachedCatalog.pending) return cachedCatalog.pending;
 	}
 
-	const pending = fetchCatalog(normalizedKey, signal);
+	const pending = fetchCatalog(normalizedKey);
 	cachedCatalog = {
 		credentialId,
 		expiresAt: 0,
@@ -307,11 +314,13 @@ async function loadCatalog(
 	};
 	try {
 		const value = await pending;
-		cachedCatalog = {
-			credentialId,
-			expiresAt: Date.now() + OPENROUTER_CATALOG_TTL_MS,
-			value,
-		};
+		if (cachedCatalog?.pending === pending) {
+			cachedCatalog = {
+				credentialId,
+				expiresAt: Date.now() + OPENROUTER_CATALOG_TTL_MS,
+				value,
+			};
+		}
 		return value;
 	} catch (error) {
 		if (cachedCatalog?.pending === pending) cachedCatalog = null;
@@ -368,6 +377,7 @@ function openRouterReasoning(
 	if ("budget_tokens" in thinking) {
 		return { max_tokens: thinking.budget_tokens };
 	}
+	if (!("effort" in thinking)) return null;
 	return {
 		effort: thinking.effort === "max" ? "high" : thinking.effort,
 	};
@@ -471,7 +481,7 @@ function mergeReasoningDetails(
 	pending: Map<string, Record<string, unknown>>,
 	details: readonly unknown[],
 ): void {
-	for (const detail of details) {
+	for (const [position, detail] of details.entries()) {
 		if (
 			typeof detail !== "object" ||
 			detail === null ||
@@ -481,11 +491,12 @@ function mergeReasoningDetails(
 		}
 		const incoming = detail as Record<string, unknown>;
 		const type = typeof incoming.type === "string" ? incoming.type : "unknown";
-		const index =
-			typeof incoming.index === "number" && Number.isFinite(incoming.index)
-				? incoming.index
-				: pending.size;
-		const key = `${index}:${type}`;
+		const key =
+			typeof incoming.id === "string" && incoming.id
+				? `id:${incoming.id}:${type}`
+				: typeof incoming.index === "number" && Number.isFinite(incoming.index)
+					? `index:${incoming.index}:${type}`
+					: `position:${position}:${type}`;
 		const existing = pending.get(key) ?? {};
 		const merged = { ...existing, ...incoming };
 		if (typeof incoming.text === "string") {
@@ -496,6 +507,35 @@ function mergeReasoningDetails(
 		}
 		pending.set(key, merged);
 	}
+}
+
+function waitForSignal<T>(
+	promise: Promise<T>,
+	signal?: AbortSignal,
+): Promise<T> {
+	if (!signal) return promise;
+	if (signal.aborted) return Promise.reject(abortReason(signal));
+	return new Promise<T>((resolve, reject) => {
+		const onAbort = () => reject(abortReason(signal));
+		signal.addEventListener("abort", onAbort, { once: true });
+		promise.then(
+			(value) => {
+				signal.removeEventListener("abort", onAbort);
+				resolve(value);
+			},
+			(error: unknown) => {
+				signal.removeEventListener("abort", onAbort);
+				reject(error);
+			},
+		);
+	});
+}
+
+function abortReason(signal: AbortSignal): unknown {
+	return (
+		signal.reason ??
+		new DOMException("The operation was aborted.", "AbortError")
+	);
 }
 
 function userContent(

@@ -53,6 +53,18 @@ describe("context windows", () => {
 		expect(contextWindowFor({ provider: "openai", model: "gpt-4o" })).toBe(
 			128_000,
 		);
+		expect(
+			contextWindowFor({
+				provider: "openrouter",
+				model: "anthropic/claude-sonnet-4.6",
+			}),
+		).toBe(200_000);
+		expect(
+			contextWindowFor({
+				provider: "openrouter",
+				model: "google/gemini-2.5-flash",
+			}),
+		).toBe(1_048_576);
 	});
 
 	it("falls back conservatively for an unknown model", () => {

@@ -32,7 +32,11 @@ const WINDOW_PATTERNS: ReadonlyArray<{ match: RegExp; tokens: number }> = [
 export const DEFAULT_CONTEXT_WINDOW = 128_000;
 
 export function contextWindowFor(model: ModelRef): number {
-	const name = model.model.trim().toLowerCase();
+	const rawName = model.model.trim().toLowerCase();
+	const name =
+		model.provider.trim().toLowerCase() === "openrouter"
+			? (rawName.split("/").at(-1) ?? rawName)
+			: rawName;
 	for (const { match, tokens } of WINDOW_PATTERNS) {
 		if (match.test(name)) return tokens;
 	}

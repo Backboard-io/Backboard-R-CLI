@@ -471,10 +471,6 @@ bun run prepare
 
 The hook runs `bun run precommit`, which runs the full validation suite.
 
-See [ARCHITECTURE.md](./ARCHITECTURE.md) for module boundaries, runtime flow,
-extension points, and design decisions. Contributors should also read
-[AGENTS.md](./AGENTS.md) for repository-specific engineering rules.
-
 ### Release builds
 
 Maintainers can cross-compile all production targets:

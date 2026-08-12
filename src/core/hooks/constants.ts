@@ -3,7 +3,7 @@ export const DEFAULT_HOOK_TIMEOUT_MS = 60_000;
 // hook cannot block turn completion or process exit.
 export const TERMINAL_HOOK_TIMEOUT_MS = 5_000;
 export const HOOK_HASH_PREFIX = "sha256:";
-export const HOOK_ENV_PREFIX = "Q_";
+export const HOOK_ENV_PREFIX = "";
 // Cap hook stdout/stderr (matches the Execute/Grep output cap).
 export const MAX_HOOK_OUTPUT = 40_000;
 

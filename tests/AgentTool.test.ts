@@ -230,7 +230,7 @@ describe("AgentTool execution", () => {
 	});
 
 	it("writes an RLM trace when a trace context is available", async () => {
-		const dir = await mkdtemp(join(tmpdir(), "q-cli-agent-trace-"));
+		const dir = await mkdtemp(join(tmpdir(), "cli-agent-trace-"));
 		try {
 			const sessionRoot = join(dir, ".backboard", "sessions", "sess_trace");
 			const { tool } = makeTool();
@@ -263,7 +263,7 @@ describe("AgentTool execution", () => {
 	});
 
 	it("writes an Agent error trace when RLM execution throws", async () => {
-		const dir = await mkdtemp(join(tmpdir(), "q-cli-agent-error-trace-"));
+		const dir = await mkdtemp(join(tmpdir(), "cli-agent-error-trace-"));
 		try {
 			const sessionRoot = join(dir, ".backboard", "sessions", "sess_trace");
 			const { tool } = makeTool({

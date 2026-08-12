@@ -111,7 +111,7 @@ describe("hooks", () => {
 		);
 	});
 
-	it("runs command hooks with JSON stdin and sanitized Q_ env", async () => {
+	it("runs command hooks with JSON stdin and sanitized hook env", async () => {
 		const dir = await tempDir();
 		const script = path.join(dir, "hook.js");
 		await writeFile(
@@ -123,7 +123,7 @@ describe("hooks", () => {
 				"process.stdin.on('end', () => {",
 				"  const parsed = JSON.parse(input);",
 				"  process.stdout.write(JSON.stringify({",
-				"    systemMessage: process.env.Q_SESSION_ID,",
+				"    systemMessage: process.env.SESSION_ID,",
 				"    hookSpecificOutput: { additionalContext: parsed.tool_name }",
 				"  }));",
 				"});",
@@ -685,7 +685,7 @@ describe("hooks", () => {
 });
 
 async function tempDir(): Promise<string> {
-	return await mkdtemp(path.join(os.tmpdir(), "q-cli-hooks-"));
+	return await mkdtemp(path.join(os.tmpdir(), "cli-hooks-"));
 }
 
 async function writeJson(filePath: string, value: unknown): Promise<void> {

@@ -12,7 +12,7 @@ import { TodoWriteTool } from "../src/tools/TodoWriteTool.tsx";
 import { WebSearchTool } from "../src/tools/WebSearchTool.tsx";
 
 async function tempProject(): Promise<string> {
-	const dir = await mkdtemp(join(tmpdir(), "q-perm-classification-"));
+	const dir = await mkdtemp(join(tmpdir(), "perm-classification-"));
 	// A .git dir makes findRepoRoot treat the temp dir as the project root.
 	await mkdir(join(dir, ".git"), { recursive: true });
 	return dir;
@@ -63,7 +63,7 @@ describe("appendAllowRule never crashes the turn", () => {
 		// Make a regular file, then use a path *under* it as cwd: mkdirSync of
 		// `<file>/sub/.backboard` fails with ENOTDIR on every platform, no root
 		// needed. (tmpdir has no .git ancestor, so findRepoRoot stays here.)
-		const dir = await mkdtemp(join(tmpdir(), "q-perm-badcwd-"));
+		const dir = await mkdtemp(join(tmpdir(), "perm-badcwd-"));
 		const filePath = join(dir, "a-file");
 		await writeFile(filePath, "x");
 		const badCwd = join(filePath, "sub");

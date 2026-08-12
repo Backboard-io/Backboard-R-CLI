@@ -1635,7 +1635,7 @@ describe("MCP primitive manager", () => {
 });
 
 async function tempDir(): Promise<string> {
-	return mkdtemp(path.join(os.tmpdir(), "q-cli-mcp-"));
+	return mkdtemp(path.join(os.tmpdir(), "cli-mcp-"));
 }
 
 async function writeJson(filePath: string, value: unknown): Promise<void> {

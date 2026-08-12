@@ -33,7 +33,7 @@ const env = { apiKey: "test-key", apiUrl: "https://example.test/api" };
 
 describe("Config", () => {
 	it("loads saved model and thinking selections", async () => {
-		const homeDir = await mkdtemp(path.join(os.tmpdir(), "q-cli-config-"));
+		const homeDir = await mkdtemp(path.join(os.tmpdir(), "cli-config-"));
 		await saveBackboardConfig(
 			{
 				apiKey: "file-key",
@@ -54,7 +54,7 @@ describe("Config", () => {
 	});
 
 	it("persists a stable project workspace id in the project config", async () => {
-		const dir = await mkdtemp(path.join(os.tmpdir(), "q-cli-workspace-"));
+		const dir = await mkdtemp(path.join(os.tmpdir(), "cli-workspace-"));
 		const child = path.join(dir, "packages", "app");
 		await mkdir(path.join(dir, ".git"), { recursive: true });
 		await mkdir(child, { recursive: true });
@@ -72,7 +72,7 @@ describe("Config", () => {
 	});
 
 	it("gitignores the workspace file it creates", async () => {
-		const dir = await mkdtemp(path.join(os.tmpdir(), "q-cli-workspace-"));
+		const dir = await mkdtemp(path.join(os.tmpdir(), "cli-workspace-"));
 		await mkdir(path.join(dir, ".git"), { recursive: true });
 
 		qProjectWorkspaceId(dir);
@@ -87,7 +87,7 @@ describe("Config", () => {
 	});
 
 	it("appends workspace.json to an existing .backboard/.gitignore that lacks it", async () => {
-		const dir = await mkdtemp(path.join(os.tmpdir(), "q-cli-workspace-"));
+		const dir = await mkdtemp(path.join(os.tmpdir(), "cli-workspace-"));
 		await mkdir(path.join(dir, ".git"), { recursive: true });
 		await mkdir(path.join(dir, ".backboard"), { recursive: true });
 		const gitignorePath = path.join(dir, ".backboard", ".gitignore");
@@ -111,7 +111,7 @@ describe("Config", () => {
 	});
 
 	it("repairs the gitignore when workspace.json predates it", async () => {
-		const dir = await mkdtemp(path.join(os.tmpdir(), "q-cli-workspace-"));
+		const dir = await mkdtemp(path.join(os.tmpdir(), "cli-workspace-"));
 		await mkdir(path.join(dir, ".git"), { recursive: true });
 		const backboardDir = path.join(dir, ".backboard");
 		await mkdir(backboardDir, { recursive: true });
@@ -135,7 +135,7 @@ describe("Config", () => {
 	});
 
 	it("returns an existing workspace id even when the gitignore repair cannot write", async () => {
-		const dir = await mkdtemp(path.join(os.tmpdir(), "q-cli-workspace-"));
+		const dir = await mkdtemp(path.join(os.tmpdir(), "cli-workspace-"));
 		await mkdir(path.join(dir, ".git"), { recursive: true });
 		const backboardDir = path.join(dir, ".backboard");
 		await mkdir(backboardDir, { recursive: true });
@@ -155,7 +155,7 @@ describe("Config", () => {
 	});
 
 	it("falls back to a stable in-memory workspace id when the project dir is unwritable", async () => {
-		const dir = await mkdtemp(path.join(os.tmpdir(), "q-cli-workspace-"));
+		const dir = await mkdtemp(path.join(os.tmpdir(), "cli-workspace-"));
 		await mkdir(path.join(dir, ".git"), { recursive: true });
 		await chmod(dir, 0o555);
 
@@ -173,7 +173,7 @@ describe("Config", () => {
 	});
 
 	it("does not create a project workspace id while constructing config", async () => {
-		const dir = await mkdtemp(path.join(os.tmpdir(), "q-cli-workspace-"));
+		const dir = await mkdtemp(path.join(os.tmpdir(), "cli-workspace-"));
 		await mkdir(path.join(dir, ".git"), { recursive: true });
 
 		new Config({ env, argv: ["--cwd", dir] });
@@ -185,7 +185,7 @@ describe("Config", () => {
 	});
 
 	it("lazily persists the project workspace id when requested", async () => {
-		const dir = await mkdtemp(path.join(os.tmpdir(), "q-cli-workspace-"));
+		const dir = await mkdtemp(path.join(os.tmpdir(), "cli-workspace-"));
 		await mkdir(path.join(dir, ".git"), { recursive: true });
 		const config = new Config({ env, argv: ["--cwd", dir] });
 
@@ -199,7 +199,7 @@ describe("Config", () => {
 	});
 
 	it("treats legacy empty thinking config as automatic", async () => {
-		const homeDir = await mkdtemp(path.join(os.tmpdir(), "q-cli-config-"));
+		const homeDir = await mkdtemp(path.join(os.tmpdir(), "cli-config-"));
 		const configPath = backboardConfigPath(homeDir);
 		await mkdir(path.dirname(configPath), { recursive: true });
 		await writeFile(
@@ -217,7 +217,7 @@ describe("Config", () => {
 	});
 
 	it("persists runtime model and thinking selections", async () => {
-		const homeDir = await mkdtemp(path.join(os.tmpdir(), "q-cli-config-"));
+		const homeDir = await mkdtemp(path.join(os.tmpdir(), "cli-config-"));
 		await saveBackboardConfig({ apiKey: "file-key" }, homeDir);
 		const config = new Config({ env, argv: [], homeDir });
 
@@ -234,7 +234,7 @@ describe("Config", () => {
 	});
 
 	it("loads saved dynamic thinking selections", async () => {
-		const homeDir = await mkdtemp(path.join(os.tmpdir(), "q-cli-config-"));
+		const homeDir = await mkdtemp(path.join(os.tmpdir(), "cli-config-"));
 		await saveBackboardConfig(
 			{
 				apiKey: "file-key",
@@ -249,7 +249,7 @@ describe("Config", () => {
 	});
 
 	it("persists the notify preference", async () => {
-		const homeDir = await mkdtemp(path.join(os.tmpdir(), "q-cli-config-"));
+		const homeDir = await mkdtemp(path.join(os.tmpdir(), "cli-config-"));
 		await saveBackboardConfig({ apiKey: "file-key" }, homeDir);
 		const config = new Config({ env, argv: [], homeDir });
 
@@ -262,7 +262,7 @@ describe("Config", () => {
 	});
 
 	it("persists the verbose preference", async () => {
-		const homeDir = await mkdtemp(path.join(os.tmpdir(), "q-cli-config-"));
+		const homeDir = await mkdtemp(path.join(os.tmpdir(), "cli-config-"));
 		await saveBackboardConfig({ apiKey: "file-key" }, homeDir);
 		const config = new Config({ env, argv: [], homeDir });
 
@@ -276,7 +276,7 @@ describe("Config", () => {
 	});
 
 	it("lets startup flags override saved model and thinking selections", async () => {
-		const homeDir = await mkdtemp(path.join(os.tmpdir(), "q-cli-config-"));
+		const homeDir = await mkdtemp(path.join(os.tmpdir(), "cli-config-"));
 		await saveBackboardConfig(
 			{
 				apiKey: "file-key",
@@ -328,7 +328,7 @@ describe("Config", () => {
 	});
 
 	it("selects a compatible default for a keys-only install", async () => {
-		const homeDir = await mkdtemp(path.join(os.tmpdir(), "q-cli-config-"));
+		const homeDir = await mkdtemp(path.join(os.tmpdir(), "cli-config-"));
 		await setProviderKey("anthropic", "sk-ant-test", homeDir);
 
 		await withBackboardEnv({}, async () => {
@@ -434,10 +434,10 @@ describe("Config", () => {
 	it("loads browser environment settings", () => {
 		expect(
 			loadBrowserEnv({
-				Q_BROWSER_PATH: " /Applications/Chrome ",
+				BROWSER_PATH: " /Applications/Chrome ",
 				CHROME_PATH: "/usr/bin/chromium",
-				Q_BROWSER_CDP_URL: " http://127.0.0.1:9222 ",
-				Q_BROWSER_WS_URL: " ws://127.0.0.1/devtools/browser/1 ",
+				BROWSER_CDP_URL: " http://127.0.0.1:9222 ",
+				BROWSER_WS_URL: " ws://127.0.0.1/devtools/browser/1 ",
 				HOME: " /Users/test ",
 				LOCALAPPDATA: " C:\\Users\\test\\AppData\\Local ",
 				PATH: "/bin:/usr/bin",
@@ -481,7 +481,7 @@ describe("Config", () => {
 	});
 
 	it("centralizes Backboard config paths", async () => {
-		const root = await mkdtemp(path.join(os.tmpdir(), "q-cli-paths-"));
+		const root = await mkdtemp(path.join(os.tmpdir(), "cli-paths-"));
 		try {
 			await mkdir(path.join(root, ".git"));
 			const nested = path.join(root, "packages", "app");
@@ -520,7 +520,7 @@ describe("Config", () => {
 	});
 
 	it("loads credentials from ~/.backboard/config.json", async () => {
-		const homeDir = await mkdtemp(path.join(os.tmpdir(), "q-cli-config-"));
+		const homeDir = await mkdtemp(path.join(os.tmpdir(), "cli-config-"));
 
 		await withBackboardEnv({}, async () => {
 			await saveBackboardConfig(
@@ -535,7 +535,7 @@ describe("Config", () => {
 	});
 
 	it("reloads saved credentials into the live env object", async () => {
-		const homeDir = await mkdtemp(path.join(os.tmpdir(), "q-cli-config-"));
+		const homeDir = await mkdtemp(path.join(os.tmpdir(), "cli-config-"));
 
 		await withBackboardEnv({}, async () => {
 			await saveBackboardConfig(
@@ -560,7 +560,7 @@ describe("Config", () => {
 	});
 
 	it("lets environment credentials override ~/.backboard config", async () => {
-		const homeDir = await mkdtemp(path.join(os.tmpdir(), "q-cli-config-"));
+		const homeDir = await mkdtemp(path.join(os.tmpdir(), "cli-config-"));
 
 		await withBackboardEnv(
 			{ apiKey: "env-key", apiUrl: "https://env.test/api/" },
@@ -578,7 +578,7 @@ describe("Config", () => {
 	});
 
 	it("uses environment credentials without reading an invalid saved config", async () => {
-		const homeDir = await mkdtemp(path.join(os.tmpdir(), "q-cli-config-"));
+		const homeDir = await mkdtemp(path.join(os.tmpdir(), "cli-config-"));
 		const configPath = backboardConfigPath(homeDir);
 		await mkdir(path.dirname(configPath), { recursive: true });
 		await writeFile(configPath, "{not json");
@@ -595,7 +595,7 @@ describe("Config", () => {
 	});
 
 	it("uses API keys exactly as provided", async () => {
-		const homeDir = await mkdtemp(path.join(os.tmpdir(), "q-cli-config-"));
+		const homeDir = await mkdtemp(path.join(os.tmpdir(), "cli-config-"));
 
 		await withBackboardEnv({ apiKey: " env-key " }, () => {
 			expect(loadEnv({ homeDir }).apiKey).toBe(" env-key ");
@@ -608,7 +608,7 @@ describe("Config", () => {
 	});
 
 	it("ignores unusable environment credentials before saved credentials", async () => {
-		const homeDir = await mkdtemp(path.join(os.tmpdir(), "q-cli-config-"));
+		const homeDir = await mkdtemp(path.join(os.tmpdir(), "cli-config-"));
 
 		await withBackboardEnv({ apiKey: "your_key_here" }, async () => {
 			await saveBackboardConfig(
@@ -634,7 +634,7 @@ describe("Config", () => {
 	});
 
 	it("lets usable environment credentials override saved credentials", async () => {
-		const homeDir = await mkdtemp(path.join(os.tmpdir(), "q-cli-config-"));
+		const homeDir = await mkdtemp(path.join(os.tmpdir(), "cli-config-"));
 
 		await withBackboardEnv({ apiKey: "env-key" }, async () => {
 			await saveBackboardConfig(
@@ -687,7 +687,7 @@ describe("Config", () => {
 	});
 
 	it("deletes saved Backboard credentials", async () => {
-		const homeDir = await mkdtemp(path.join(os.tmpdir(), "q-cli-config-"));
+		const homeDir = await mkdtemp(path.join(os.tmpdir(), "cli-config-"));
 
 		await withBackboardEnv({}, async () => {
 			await saveBackboardConfig({ apiKey: "file-key" }, homeDir);
@@ -738,7 +738,7 @@ describe("resolveApiUrl", () => {
 	});
 
 	it("refuses a non-https URL from the config file", async () => {
-		const homeDir = await mkdtemp(path.join(os.tmpdir(), "q-cli-config-"));
+		const homeDir = await mkdtemp(path.join(os.tmpdir(), "cli-config-"));
 		await withBackboardEnv({}, async () => {
 			await saveBackboardConfig(
 				{ apiKey: "file-key", apiUrl: "http://192.168.1.10/api" },

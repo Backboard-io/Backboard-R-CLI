@@ -19,7 +19,7 @@ function context(cwd: string): ToolContext {
 }
 
 async function tempDir(): Promise<string> {
-	return await mkdtemp(join(tmpdir(), "q-cli-read-"));
+	return await mkdtemp(join(tmpdir(), "cli-read-"));
 }
 
 describe("ReadTool", () => {

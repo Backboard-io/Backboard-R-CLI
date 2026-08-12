@@ -84,7 +84,7 @@ describe("tool result titles", () => {
 	});
 
 	it("summarizes changed lines and returns a compact edit diff", async () => {
-		const cwd = await mkdtemp(join(tmpdir(), "q-cli-edit-"));
+		const cwd = await mkdtemp(join(tmpdir(), "cli-edit-"));
 		const filePath = "sample.txt";
 		await writeFile(join(cwd, filePath), "hello\nworld\n", "utf8");
 
@@ -136,7 +136,7 @@ describe("tool result titles", () => {
 	});
 
 	it("counts all replacement lines for replace_all edits", async () => {
-		const cwd = await mkdtemp(join(tmpdir(), "q-cli-edit-all-"));
+		const cwd = await mkdtemp(join(tmpdir(), "cli-edit-all-"));
 		const filePath = "sample.txt";
 		await writeFile(join(cwd, filePath), "one\none\n", "utf8");
 

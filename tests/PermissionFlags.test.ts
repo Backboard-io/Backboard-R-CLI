@@ -19,7 +19,7 @@ describe("--permission-mode flag", () => {
 
 describe("buildPermissionContext", () => {
 	it("flag beats settings mode; default is manual", async () => {
-		const cwd = await mkdtemp(join(tmpdir(), "q-perm-wire-"));
+		const cwd = await mkdtemp(join(tmpdir(), "perm-wire-"));
 		await mkdir(join(cwd, ".git"), { recursive: true });
 		await mkdir(join(cwd, ".backboard"), { recursive: true });
 		await writeFile(
@@ -32,13 +32,13 @@ describe("buildPermissionContext", () => {
 		expect(buildPermissionContext(cwd, undefined, true).mode).toBe(
 			"acceptEdits",
 		);
-		const fresh = await mkdtemp(join(tmpdir(), "q-perm-wire2-"));
+		const fresh = await mkdtemp(join(tmpdir(), "perm-wire2-"));
 		await mkdir(join(fresh, ".git"), { recursive: true });
 		expect(buildPermissionContext(fresh, undefined, true).mode).toBe("manual");
 	});
 
 	it("loads rules from settings and carries interactivity", async () => {
-		const cwd = await mkdtemp(join(tmpdir(), "q-perm-wire3-"));
+		const cwd = await mkdtemp(join(tmpdir(), "perm-wire3-"));
 		await mkdir(join(cwd, ".git"), { recursive: true });
 		await mkdir(join(cwd, ".backboard"), { recursive: true });
 		await writeFile(

@@ -16,7 +16,7 @@ import {
 import type { HookConfigFile, LoadedHook } from "../src/core/hooks/types.ts";
 
 async function tempDir(): Promise<string> {
-	return await mkdtemp(path.join(os.tmpdir(), "q-cli-hookwrite-"));
+	return await mkdtemp(path.join(os.tmpdir(), "cli-hookwrite-"));
 }
 
 function paths(home: string): { project: string; user: string } {

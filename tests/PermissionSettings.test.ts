@@ -8,7 +8,7 @@ import {
 } from "../src/core/permissions/settings.ts";
 
 async function tempProject(): Promise<string> {
-	const dir = await mkdtemp(join(tmpdir(), "q-perm-settings-"));
+	const dir = await mkdtemp(join(tmpdir(), "perm-settings-"));
 	// A .git dir makes findRepoRoot treat the temp dir as the project root.
 	await mkdir(join(dir, ".git"), { recursive: true });
 	return dir;

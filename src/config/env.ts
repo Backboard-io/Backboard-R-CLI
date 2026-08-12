@@ -109,12 +109,10 @@ export function loadBrowserEnv(
 	source: Record<string, string | undefined> = process.env,
 ): BrowserEnv {
 	return {
-		browserPath: optionalTrimmed(source.Q_BROWSER_PATH),
+		browserPath: optionalTrimmed(source.BROWSER_PATH),
 		chromePath: optionalTrimmed(source.CHROME_PATH),
-		browserCdpUrl:
-			optionalTrimmed(source.Q_BROWSER_CDP_URL) ??
-			optionalTrimmed(source.BROWSER_CDP_URL),
-		browserWsUrl: optionalTrimmed(source.Q_BROWSER_WS_URL),
+		browserCdpUrl: optionalTrimmed(source.BROWSER_CDP_URL),
+		browserWsUrl: optionalTrimmed(source.BROWSER_WS_URL),
 		home: optionalTrimmed(source.HOME),
 		localAppData: optionalTrimmed(source.LOCALAPPDATA),
 		path: source.PATH,

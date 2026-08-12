@@ -1,5 +1,5 @@
 {
-	"//": "Single source of truth for LSP server ids, binaries, and npm packages. Consumed by the runtime registry (cli-ts/src/core/lsp/servers.ts) and the eval provisioning scripts (cli-ts-eval/internal/agent/q_cli_harbor/lsp_manifest.py). Edit here; never hardcode these triples elsewhere.",
+	"//": "Single source of truth for LSP server ids, binaries, and npm packages. Consumed by the runtime registry (src/core/lsp/servers.ts). Edit here; never hardcode these triples elsewhere.",
 	"servers": [
 		{
 			"id": "pyright",

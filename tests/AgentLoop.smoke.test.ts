@@ -1601,7 +1601,7 @@ describe("AgentController attachment file paths", () => {
 });
 
 async function tempDir(): Promise<string> {
-	return mkdtemp(path.join(os.tmpdir(), "q-cli-agent-"));
+	return mkdtemp(path.join(os.tmpdir(), "cli-agent-"));
 }
 
 async function writeSkill(

@@ -128,7 +128,7 @@ export class BrowserSessionManager {
 			...this.executableOptions,
 			env: this.env,
 		});
-		const profileDir = await mkdtemp(join(tmpdir(), "q-browser-profile-"));
+		const profileDir = await mkdtemp(join(tmpdir(), "browser-profile-"));
 		const proc = this.spawnImpl(
 			[
 				executable,

@@ -317,9 +317,9 @@ Most users do not need environment variables.
 | `BACKBOARD_API_URL`                  | Override the API base URL; defaults to `https://app.backboard.io/api` |
 | `BACKBOARD_OAUTH_CLIENT_ID`          | Override the first-party public OAuth client ID                       |
 | `BACKBOARD_ALLOW_INSECURE_API_URL=1` | Permit a non-HTTPS API URL for internal development                   |
-| `Q_BROWSER_PATH`                     | Use a specific Chrome or Chromium executable                          |
-| `Q_BROWSER_CDP_URL`                  | Connect the Browser tool to an existing CDP HTTP endpoint             |
-| `Q_BROWSER_WS_URL`                   | Connect the Browser tool to an existing CDP WebSocket endpoint        |
+| `BROWSER_PATH`                     | Use a specific Chrome or Chromium executable                          |
+| `BROWSER_CDP_URL`                  | Connect the Browser tool to an existing CDP HTTP endpoint             |
+| `BROWSER_WS_URL`                   | Connect the Browser tool to an existing CDP WebSocket endpoint        |
 
 Environment variables override saved Backboard credentials where applicable.
 Never commit real credentials to `.env`.
@@ -470,10 +470,6 @@ bun run prepare
 ```
 
 The hook runs `bun run precommit`, which runs the full validation suite.
-
-See [ARCHITECTURE.md](./ARCHITECTURE.md) for module boundaries, runtime flow,
-extension points, and design decisions. Contributors should also read
-[AGENTS.md](./AGENTS.md) for repository-specific engineering rules.
 
 ### Release builds
 

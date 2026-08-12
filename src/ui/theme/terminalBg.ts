@@ -76,9 +76,9 @@ function queryOsc11(timeoutMs: number): Promise<string | null> {
 }
 
 /** Manual override for terminals that can't be probed (GNU screen, conhost).
- *  Q_TERMINAL_BG=light | dark | #rrggbb | #rgb */
+ *  TERMINAL_BG=light | dark | #rrggbb | #rgb */
 function fromEnvOverride(): string | null {
-	const v = process.env.Q_TERMINAL_BG?.trim().toLowerCase();
+	const v = process.env.TERMINAL_BG?.trim().toLowerCase();
 	if (!v) return null;
 	if (v === "light") return "#ffffff";
 	if (v === "dark") return "#000000";

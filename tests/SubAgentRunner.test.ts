@@ -199,7 +199,7 @@ describe("SubAgentRunner", () => {
 	});
 
 	it("records worker child events when trace logging is configured", async () => {
-		const dir = await mkdtemp(join(tmpdir(), "q-cli-worker-trace-"));
+		const dir = await mkdtemp(join(tmpdir(), "cli-worker-trace-"));
 		try {
 			const client = new CompletingClient();
 			const runner = runnerWith(client, []);

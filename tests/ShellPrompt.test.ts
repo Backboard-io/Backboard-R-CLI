@@ -3,7 +3,7 @@ import { shellPromptLayout } from "../src/ui/components/ShellPrompt.tsx";
 import { compactPathLabel } from "../src/ui/utils/pathLabels.ts";
 
 const LONG_USER = "muhammadbalawalsafdar";
-const LONG_PATH = "~/Documents/backboard/Espri-API/q-cli";
+const LONG_PATH = "~/Documents/backboard/Espri-API/r-cli";
 const VERSION = "v0.2.1";
 
 describe("shellPromptLayout", () => {
@@ -47,7 +47,7 @@ describe("shellPromptLayout", () => {
 			}),
 		).toEqual({
 			user: LONG_USER,
-			path: "~/.../Espri-API/q-cli",
+			path: "~/.../Espri-API/r-cli",
 			version: VERSION,
 		});
 	});
@@ -61,7 +61,7 @@ describe("shellPromptLayout", () => {
 				version: VERSION,
 			}),
 		).toEqual({
-			path: "~/.../Espri-API/q-cli",
+			path: "~/.../Espri-API/r-cli",
 			version: VERSION,
 		});
 	});
@@ -75,14 +75,14 @@ describe("shellPromptLayout", () => {
 				version: VERSION,
 			}),
 		).toEqual({
-			path: "~/.../q-cli",
+			path: "~/.../r-cli",
 		});
 	});
 });
 
 describe("compactPathLabel", () => {
 	it("keeps the repository tail for home-relative paths", () => {
-		expect(compactPathLabel(LONG_PATH, 18)).toBe("~/.../q-cli");
+		expect(compactPathLabel(LONG_PATH, 18)).toBe("~/.../r-cli");
 	});
 
 	it("clips from the start when even the final path part is too long", () => {

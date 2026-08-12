@@ -22,7 +22,7 @@ function context(cwd: string): ToolContext {
 }
 
 async function tempDir(): Promise<string> {
-	return await mkdtemp(join(tmpdir(), "q-cli-tools-"));
+	return await mkdtemp(join(tmpdir(), "cli-tools-"));
 }
 
 describe("mutation tools", () => {

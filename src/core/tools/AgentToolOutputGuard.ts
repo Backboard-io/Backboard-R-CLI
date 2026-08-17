@@ -10,7 +10,8 @@ export function requireAgentToolOutput(output: unknown): AgentToolOutput {
 		typeof data.report === "string" &&
 		typeof data.status === "string" &&
 		typeof data.rounds === "number" &&
-		(data.tracePath === undefined || typeof data.tracePath === "string")
+		(data.tracePath === undefined || typeof data.tracePath === "string") &&
+		(data.runId === undefined || typeof data.runId === "string")
 	) {
 		return {
 			mode: data.mode,
@@ -18,6 +19,7 @@ export function requireAgentToolOutput(output: unknown): AgentToolOutput {
 			status: data.status,
 			rounds: data.rounds,
 			...(data.tracePath ? { tracePath: data.tracePath } : {}),
+			...(data.runId ? { runId: data.runId } : {}),
 		};
 	}
 	throw new Error("Agent tool returned invalid output");

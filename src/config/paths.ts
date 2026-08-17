@@ -7,6 +7,7 @@ export const BACKBOARD_CONFIG_DIR_NAME = ".backboard";
 export const MCP_CONFIG_FILE_NAME = "mcp.json";
 export const HOOK_CONFIG_FILE_NAME = "hooks.json";
 export const SESSION_DIR_NAME = "sessions";
+export const AGENTS_DIR_NAME = "agents";
 export const WORKSPACE_CONFIG_FILE_NAME = "workspace.json";
 
 export interface McpConfigPaths {
@@ -117,6 +118,14 @@ export function qProjectHookConfigPath(cwd: string): string {
 
 export function qUserHookConfigPath(homeDir?: string): string {
 	return path.join(qUserConfigDir(homeDir), HOOK_CONFIG_FILE_NAME);
+}
+
+export function qProjectAgentsDir(cwd: string): string {
+	return path.join(qProjectConfigDir(cwd), AGENTS_DIR_NAME);
+}
+
+export function qUserAgentsDir(homeDir?: string): string {
+	return path.join(qUserConfigDir(homeDir), AGENTS_DIR_NAME);
 }
 
 export function qSessionDir(baseDir: string, sessionId: string): string {

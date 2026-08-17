@@ -8,6 +8,8 @@ import type {
 	SubAgentResult,
 	SubAgentRunParams,
 } from "../src/core/agent/SubAgentRunner.ts";
+import { AgentCatalog } from "../src/core/agents/AgentCatalog.ts";
+import { BUILT_IN_AGENTS } from "../src/core/agents/builtin.ts";
 import { EventBus } from "../src/core/bus/EventBus.ts";
 import type { OpenAITool } from "../src/core/tools/schema.ts";
 import type { ToolContext } from "../src/core/tools/ToolContext.ts";
@@ -68,7 +70,9 @@ function makeTool(
 	const tool = new AgentTool({
 		runner,
 		createRLMLoop: () => rlmLoop,
+		getCatalog: () => new AgentCatalog(BUILT_IN_AGENTS),
 		maxDepth: 2,
+		maxConcurrent: 8,
 		...overrides,
 	});
 	return { tool, workerCalls, rlmCalls };
@@ -83,11 +87,36 @@ describe("AgentTool schema and flags", () => {
 		expect(parsed.subagent_type).toBeUndefined();
 	});
 
-	it("rejects unsupported subagent types", () => {
+	it("rejects subagent types absent from the catalog", async () => {
 		const { tool } = makeTool();
-		expect(() =>
-			tool.parseInput({ prompt: "do it", subagent_type: "planner" }),
-		).toThrow();
+		await expect(
+			tool.execute({ prompt: "do it", subagent_type: "planner" }, ctx(0)),
+		).rejects.toThrow("Unknown subagent_type 'planner'");
+	});
+
+	it("advertises catalog agents in the schema enum and description", () => {
+		const { tool } = makeTool({
+			getCatalog: () =>
+				new AgentCatalog([
+					...BUILT_IN_AGENTS,
+					{
+						name: "researcher",
+						description: "Deep-dives one question.",
+						mode: "worker",
+						systemPrompt: "You research.",
+						source: "project",
+					},
+				]),
+		});
+		const parameters = tool.toJSONSchema().function.parameters as {
+			properties?: { subagent_type?: { enum?: string[] } };
+		};
+		expect(parameters.properties?.subagent_type?.enum).toEqual([
+			"worker",
+			"rlm",
+			"researcher",
+		]);
+		expect(tool.prompt()).toContain("`researcher`: Deep-dives one question.");
 	});
 
 	it("emits a Backboard-compatible variables object schema", () => {

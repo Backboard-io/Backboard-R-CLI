@@ -6,4 +6,6 @@ export interface AgentToolOutput {
 	status: string;
 	rounds: number;
 	tracePath?: string;
+	/** Set when the spawn was handed to the background supervisor. */
+	runId?: string;
 }

@@ -9,6 +9,17 @@ export type TurnStatus =
 	| "failed"
 	| "cancelled";
 
+/** A sub-agent running past the turn that spawned it. */
+export interface BackgroundRunSnapshot {
+	id: string;
+	agent: string;
+	label: string;
+	status: "running" | TurnStatus | "timed_out";
+	startedAt: number;
+	finishedAt?: number;
+	rounds: number;
+}
+
 export interface ToolCallRef {
 	id: string;
 	name: string;
@@ -122,6 +133,8 @@ export type AgentEvent =
 			status: "done" | "error";
 	  }
 	| ToolResultEvent
+	| { type: "agent:background_started"; run: BackgroundRunSnapshot }
+	| { type: "agent:background_finished"; run: BackgroundRunSnapshot }
 	| { type: "tool:error"; toolCallId: string; name: string; error: string }
 	| {
 			type: "turn:end";

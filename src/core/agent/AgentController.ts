@@ -41,14 +41,17 @@ import type { OpenAITool } from "../tools/schema.ts";
 import type { ToolContext } from "../tools/ToolContext.ts";
 import type { ToolRegistry } from "../tools/ToolRegistry.ts";
 import type { ToolScheduler } from "../tools/ToolScheduler.ts";
-import type {
-	CancelOptions,
-	QueuedSubmit,
-	SubmitOptions,
+import {
+	type CancelOptions,
+	type QueuedSubmit,
+	SUBMIT_PRIORITY_ORDER,
+	type SubmitOptions,
+	type SubmitPriority,
 } from "./AgentControllerTypes.ts";
 import { AgentLoopFactory } from "./AgentLoopFactory.ts";
 import { AgentTraceContext } from "./AgentTraceStore.ts";
 import { AssistantSessionBinding } from "./AssistantSessionBinding.ts";
+import type { BackgroundAgentSupervisor } from "./BackgroundAgentSupervisor.ts";
 import { Turn } from "./Turn.ts";
 
 export interface AgentControllerDeps {
@@ -71,6 +74,8 @@ export interface AgentControllerDeps {
 	};
 	onThreadReplaced?: (threadId: string | null) => void;
 	permissions: PermissionContext;
+	/** Stopped when the thread is reset, so stale reports never land. */
+	backgroundSupervisor?: Pick<BackgroundAgentSupervisor, "cancelAll">;
 	/**
 	 * Absolute path to this run's client transcript. Named in the handoff so a
 	 * compressed agent can read back anything the summary left out.
@@ -200,7 +205,7 @@ export class AgentController {
 	}
 
 	async submit(text: string, options: SubmitOptions = {}): Promise<TurnStatus> {
-		return this.enqueueSubmit(text, "back", {
+		return this.enqueueSubmit(text, options.priority ?? "next", {
 			emitUserMessage: options.emitUserMessage ?? true,
 			onStart: options.onStart,
 			attachmentFilePaths: options.attachmentFilePaths,
@@ -210,7 +215,7 @@ export class AgentController {
 
 	async steer(text: string, options: SubmitOptions = {}): Promise<TurnStatus> {
 		const shouldCancelActiveTurn = this.abortController !== null;
-		const run = this.enqueueSubmit(text, "front", {
+		const run = this.enqueueSubmit(text, "now", {
 			emitUserMessage: options.emitUserMessage ?? false,
 			onStart: options.onStart,
 			attachmentFilePaths: options.attachmentFilePaths,
@@ -222,28 +227,43 @@ export class AgentController {
 
 	private enqueueSubmit(
 		text: string,
-		placement: "front" | "back",
+		priority: SubmitPriority,
 		options: Required<Pick<SubmitOptions, "emitUserMessage">> &
 			Pick<SubmitOptions, "onStart" | "attachmentFilePaths" | "displayContent">,
 	): Promise<TurnStatus> {
 		const run = new Promise<TurnStatus>((resolve, reject) => {
-			const queued = {
+			this.queue.push({
 				text,
+				priority,
 				emitUserMessage: options.emitUserMessage,
 				onStart: options.onStart,
 				attachmentFilePaths: options.attachmentFilePaths,
 				displayContent: options.displayContent,
 				resolve,
 				reject,
-			};
-			if (placement === "front") {
-				this.queue.unshift(queued);
-			} else {
-				this.queue.push(queued);
-			}
+			});
 		});
 		void this.drainSubmitQueue();
 		return run;
+	}
+
+	/**
+	 * Removes the highest-priority submission, FIFO within a tier. Selection
+	 * happens at drain time rather than insert time so a `now` steer queued
+	 * behind a `later` report still runs first.
+	 */
+	private takeNextSubmit(): QueuedSubmit | undefined {
+		let bestIndex = -1;
+		let bestRank = Number.POSITIVE_INFINITY;
+		for (const [index, queued] of this.queue.entries()) {
+			const rank = SUBMIT_PRIORITY_ORDER[queued.priority];
+			if (rank < bestRank) {
+				bestIndex = index;
+				bestRank = rank;
+			}
+		}
+		if (bestIndex === -1) return undefined;
+		return this.queue.splice(bestIndex, 1)[0];
 	}
 
 	private async drainSubmitQueue(): Promise<void> {
@@ -251,7 +271,7 @@ export class AgentController {
 		this.drainingQueue = true;
 		try {
 			while (this.queue.length > 0) {
-				const queued = this.queue.shift();
+				const queued = this.takeNextSubmit();
 				if (!queued) continue;
 				try {
 					queued.onStart?.();
@@ -611,6 +631,10 @@ export class AgentController {
 	/** Cancels any active turn and starts a fresh Backboard thread. */
 	newThread(): void {
 		this.cancel({ clearQueue: true });
+		// Background agents were spawned to serve the discarded conversation;
+		// letting them report into the new thread would reference context that
+		// no longer exists.
+		this.deps.backgroundSupervisor?.cancelAll();
 		this.deps.session.reset();
 	}
 

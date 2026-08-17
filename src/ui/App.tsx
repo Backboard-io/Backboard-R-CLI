@@ -1992,6 +1992,7 @@ export function App({
 								model={agent.state.model}
 								thinking={config.thinking}
 								permissionMode={agent.state.permissionMode}
+								backgroundAgents={agent.state.backgroundAgents}
 							/>
 						</>
 					)}

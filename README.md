@@ -290,6 +290,8 @@ R-CLI keeps user credentials separate from project state.
 | `<repo-root>/.backboard/settings.json` | Project permission policy                         |
 | `<repo-root>/.backboard/mcp.json`      | Shareable project MCP configuration               |
 | `<repo-root>/.backboard/hooks.json`    | Shareable project hook configuration              |
+| `<repo-root>/.backboard/agents/`       | Shareable project sub-agent definitions           |
+| `~/.backboard/agents/`                 | Personal sub-agent definitions                    |
 | `<cwd>/.backboard/sessions/`           | Session logs, BYOK conversations, and checkpoints |
 | `<cwd>/.agents/skills/`                | Project skills                                    |
 | `~/.agents/skills/`                    | Personal skills                                   |
@@ -307,6 +309,106 @@ For exact formats and precedence, see:
 - [Command and configuration reference](https://docs.backboard.io/cli/reference)
 - [MCP servers and hooks](https://docs.backboard.io/cli/mcp)
 - [Skills and discovery](https://docs.backboard.io/cli/skills)
+
+## Custom sub-agents
+
+The agent delegates scoped work to sub-agents through the `Agent` tool. Each
+sub-agent runs with its own context and returns only a final report, so its
+intermediate tool calls never enter the main session.
+
+Define your own by adding a Markdown file to `.backboard/agents/`. The YAML
+frontmatter configures the agent; the body becomes its system prompt.
+
+```markdown
+---
+description: Deep-dives one question, read-only.
+tools: [read, grep, glob, execute]
+model: anthropic/claude-opus-5
+maxRounds: 30
+---
+
+You are a research sub-agent. Never modify files.
+Report findings as file paths with a one-line summary each.
+```
+
+Save that as `.backboard/agents/researcher.md` and the agent can call it with
+`subagent_type: "researcher"`.
+
+| Field             | Default          | Purpose                                                       |
+| ----------------- | ---------------- | ------------------------------------------------------------- |
+| `description`     | required         | Shown to the model when it picks an agent                     |
+| `name`            | filename         | Lowercase letters, digits, and hyphens                        |
+| `mode`            | `worker`         | `worker` uses tools; `rlm` analyzes input in a JavaScript REPL |
+| `tools`           | all delegatable  | Allowlist of tool names                                       |
+| `disallowedTools` | none             | Tool names to remove                                          |
+| `model`           | inherits session | `provider/model`, or `inherit`                                |
+| `maxRounds`       | `20`             | Tool rounds before the sub-agent is stopped                   |
+| `timeoutMs`       | none             | Wall-clock budget — see "Time budgets" below                  |
+| `background`      | `false`          | Run past the current turn — see "Background agents" below     |
+
+Project files take precedence over personal ones, and both override the
+built-in `worker` and `rlm` agents if they reuse those names. Files that fail
+validation are skipped with a startup warning rather than blocking the session.
+
+Sub-agents cannot prompt you, so they never receive the `ask_user`, `browser`,
+or `computer` tools. Nesting is opt-in: an agent that sets `tools` must include
+`agent` to spawn sub-agents of its own, and nesting stops at two levels deep.
+
+### Time budgets
+
+`timeoutMs` bounds a single run. When it expires the agent is not simply
+killed — it is asked, in one short final turn with no tools, to report what it
+established before running out. You get a partial answer with `status:
+timed_out` rather than nothing.
+
+A budget is separate from `maxRounds`: rounds bound how many times the agent may
+call tools, the budget bounds wall-clock time, and whichever is reached first
+ends the run.
+
+### Background agents
+
+An agent with `background: true` does not block the turn that spawned it. The
+spawn returns immediately, the agent keeps working, and when it finishes its
+report is delivered into the session as a new turn.
+
+```markdown
+---
+description: Watches a long build and reports the outcome.
+tools: [read, grep, execute]
+background: true
+timeoutMs: 900000
+---
+
+Run the build, wait for it, and report pass/fail with the failing output.
+```
+
+While background agents run, the status bar lists them:
+
+```
+✦ Auto mode · (shift+tab to cycle) · anthropic/claude-opus-5 · 2 agents running
+  ↳ watcher   1m20s  run the build and report the outcome
+  ↳ reviewer  0m14s  review the diff on this branch
+```
+
+Details worth knowing:
+
+- **Your input always wins.** Reports are queued at a lower priority than
+  anything you type, so a finished agent can never talk over you. If the session
+  is idle when one finishes, it starts a turn on its own.
+- **Cancelling the foreground does not kill them.** Background agents run on
+  their own cancellation signal. They are stopped when you start a new thread or
+  exit.
+- **Only top-level spawns go to the background.** A sub-agent that spawns
+  another one runs it inline regardless of the flag, so no agent is left without
+  someone to report to.
+- **`/undo` does not cover them.** A background agent outlives the checkpoint of
+  the turn that spawned it, so its file edits are deliberately not journaled
+  there rather than being written into an already-finalized checkpoint. Prefer
+  read-only tools for background agents that you do not want to review by hand.
+- **At most four run at once**; further background spawns queue.
+- **`--print` and `--format json` ignore the flag.** A headless run exits after
+  one prompt, so background agents there would be cancelled before reporting;
+  they run inline instead and the answer includes their work.
 
 ## Environment variables
 

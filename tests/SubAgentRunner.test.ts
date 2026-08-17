@@ -7,6 +7,7 @@ import {
 	SubAgentRunner,
 	type SubAgentRunParams,
 } from "../src/core/agent/SubAgentRunner.ts";
+import type { AgentDefinition } from "../src/core/agents/AgentDefinition.ts";
 import { EventBus } from "../src/core/bus/EventBus.ts";
 import type { OpenAITool } from "../src/core/tools/schema.ts";
 import type { Tool } from "../src/core/tools/Tool.ts";
@@ -91,6 +92,14 @@ class RepeatingToolCallClient extends CompletingClient {
 	}
 }
 
+const TEST_DEFINITION: AgentDefinition = {
+	name: "worker",
+	description: "test worker",
+	mode: "worker",
+	systemPrompt: "you are a sub-agent",
+	source: "built-in",
+};
+
 function runnerWith(client: BackboardClient, tools: Tool[]): SubAgentRunner {
 	return new SubAgentRunner({
 		client,
@@ -98,7 +107,6 @@ function runnerWith(client: BackboardClient, tools: Tool[]): SubAgentRunner {
 		memory: "off",
 		memoryProfile: "code",
 		getThinking: async () => undefined,
-		systemPrompt: "you are a sub-agent",
 		toolFactory: () => tools,
 	});
 }
@@ -113,6 +121,7 @@ describe("SubAgentRunner", () => {
 		const result = await runner.run({
 			prompt: "summarize the module\n\nReturn one sentence.",
 			depth: 1,
+			definition: TEST_DEFINITION,
 			parentCwd: process.cwd(),
 			parentSignal: new AbortController().signal,
 		});
@@ -156,6 +165,7 @@ describe("SubAgentRunner", () => {
 		await runner.run({
 			prompt: "x",
 			depth: 2,
+			definition: TEST_DEFINITION,
 			parentCwd: process.cwd(),
 			parentSignal: new AbortController().signal,
 		});
@@ -170,6 +180,7 @@ describe("SubAgentRunner", () => {
 		await runner.run({
 			prompt: "x",
 			depth: 1,
+			definition: TEST_DEFINITION,
 			parentCwd: process.cwd(),
 			parentSignal: controller.signal,
 		});
@@ -189,6 +200,7 @@ describe("SubAgentRunner", () => {
 		const result = await runner.run({
 			prompt: "keep using tools",
 			depth: 1,
+			definition: TEST_DEFINITION,
 			parentCwd: process.cwd(),
 			parentSignal: new AbortController().signal,
 		});
@@ -208,6 +220,7 @@ describe("SubAgentRunner", () => {
 			await runner.run({
 				prompt: "summarize",
 				depth: 1,
+				definition: TEST_DEFINITION,
 				parentCwd: dir,
 				parentSignal: new AbortController().signal,
 				trace: {
@@ -272,6 +285,7 @@ describe("SubAgentRunner", () => {
 		const result = await runner.run({
 			prompt: "track child work",
 			depth: 1,
+			definition: TEST_DEFINITION,
 			parentCwd: process.cwd(),
 			parentSignal: new AbortController().signal,
 			parentBus,
@@ -303,6 +317,7 @@ describe("SubAgentRunner", () => {
 			{
 				prompt: "x",
 				depth: 1,
+				definition: TEST_DEFINITION,
 				parentCwd: process.cwd(),
 				parentSignal: controller.signal,
 				parentBus,

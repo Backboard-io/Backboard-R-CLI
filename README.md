@@ -588,3 +588,7 @@ Backboard R-CLI is released under the [MIT License](./LICENSE).
 
 Before accepting public contributions, add a `CONTRIBUTING.md`, code of
 conduct, and security-reporting policy and link them from this README.
+
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=Backboard-io/Backboard-R-CLI&type=Date)](https://star-history.com/#Backboard-io/Backboard-R-CLI&Date)

@@ -1,3 +1,5 @@
+import type { ModelRef, ThinkingConfig } from "../../config/defaults.ts";
+import type { RuntimeThinkingResolver } from "../../config/thinkingRuntime.ts";
 import { shortId } from "../../utils/id.ts";
 import { EventBus } from "../bus/EventBus.ts";
 import { emptyRuleSet } from "../permissions/PermissionRules.ts";
@@ -6,7 +8,13 @@ import { Session } from "../session/Session.ts";
 import type { ToolContext } from "../tools/ToolContext.ts";
 import { ToolRegistry } from "../tools/ToolRegistry.ts";
 import { AgentLoopFactory } from "./AgentLoopFactory.ts";
-import { MAX_SUBAGENT_TOOL_ROUNDS } from "./SubAgentConstants.ts";
+import { RunBudget } from "./RunBudget.ts";
+import {
+	MAX_SUBAGENT_TOOL_ROUNDS,
+	SUBAGENT_TIMEOUT_SUMMARY_MS,
+	TIMED_OUT_WITHOUT_REPORT,
+	timeoutSummaryPrompt,
+} from "./SubAgentConstants.ts";
 import type {
 	SubAgentResult,
 	SubAgentRunnerDeps,
@@ -17,6 +25,7 @@ export type {
 	SubAgentResult,
 	SubAgentRunnerDeps,
 	SubAgentRunParams,
+	SubAgentStatus,
 	SubAgentToolFactory,
 } from "./SubAgentTypes.ts";
 
@@ -55,6 +64,7 @@ export class SubAgentRunner {
 
 		const tools = this.deps.toolFactory({
 			depth: params.depth,
+			definition: params.definition,
 		});
 		const registry = new ToolRegistry(tools);
 		const toolSchemas = registry.toJSONSchemas();
@@ -68,7 +78,7 @@ export class SubAgentRunner {
 			isToolEnabled: this.deps.isToolEnabled,
 		});
 
-		const model = this.deps.getModel();
+		const model = params.definition.model ?? this.deps.getModel();
 		const thinkingResolver = this.deps.getThinkingResolver
 			? await this.deps.getThinkingResolver()
 			: undefined;
@@ -88,11 +98,16 @@ export class SubAgentRunner {
 			? parentRecorder?.scopedToTurn(params.parentTurnId)
 			: undefined;
 
+		const budget = RunBudget.start(
+			params.parentSignal,
+			params.definition.timeoutMs,
+		);
+
 		const ctx: ToolContext = {
 			sessionId: session.sessionId,
 			cwd: params.parentCwd,
 			bus,
-			signal: params.parentSignal,
+			signal: budget.signal,
 			// A sub-agent can never prompt the human, so AskUser is unavailable.
 			askUser: async () => {
 				throw new Error("A sub-agent cannot ask the user a question.");
@@ -115,18 +130,39 @@ export class SubAgentRunner {
 			session,
 			bus,
 			tools: toolSchemas,
-			systemPrompt: this.deps.systemPrompt,
+			systemPrompt: params.definition.systemPrompt,
 			model,
 			memory: this.deps.memory,
 			memoryProfile: this.deps.memoryProfile,
 			thinking,
 			thinkingResolver,
 			requestKind: "subagent",
-			maxToolRounds: MAX_SUBAGENT_TOOL_ROUNDS,
+			maxToolRounds: params.definition.maxRounds ?? MAX_SUBAGENT_TOOL_ROUNDS,
 		});
 
 		try {
 			const status = await loop.run(params.prompt.trim(), ctx);
+
+			// A timeout surfaces as a cancelled turn. Rather than discard the work,
+			// spend one short bounded turn asking for what it established so far.
+			if (status === "cancelled" && budget.timedOut) {
+				await this.summarizeAfterTimeout({
+					loopFactory,
+					session,
+					bus,
+					ctx,
+					params,
+					model,
+					thinking,
+					thinkingResolver,
+				});
+				return {
+					report: reports.at(-1) ?? TIMED_OUT_WITHOUT_REPORT,
+					status: "timed_out",
+					usage: session.usage,
+					toolRounds: loop.toolRounds,
+				};
+			}
 
 			return {
 				report: reports.at(-1) ?? "(the sub-agent produced no output)",
@@ -135,9 +171,60 @@ export class SubAgentRunner {
 				toolRounds: loop.toolRounds,
 			};
 		} finally {
+			budget.dispose();
 			detachParentProgress();
 			detachSessionProjection();
 			await childLog?.flush();
+		}
+	}
+
+	/**
+	 * Runs one tool-less turn on the timed-out sub-agent's own session, so the
+	 * report reflects its actual findings. Best-effort: a failure here leaves the
+	 * last streamed message as the report rather than losing the run.
+	 */
+	private async summarizeAfterTimeout(input: {
+		loopFactory: AgentLoopFactory;
+		session: Session;
+		bus: EventBus;
+		ctx: ToolContext;
+		params: SubAgentRunParams;
+		model: ModelRef;
+		thinking: ThinkingConfig | null | undefined;
+		thinkingResolver: RuntimeThinkingResolver | undefined;
+	}): Promise<void> {
+		const signal = AbortSignal.any([
+			input.params.parentSignal,
+			AbortSignal.timeout(SUBAGENT_TIMEOUT_SUMMARY_MS),
+		]);
+		if (signal.aborted) return;
+
+		const registry = new ToolRegistry([]);
+		const summaryLoop = input.loopFactory.createLoop({
+			scheduler: input.loopFactory.createScheduler({
+				registry,
+				bus: input.bus,
+			}),
+			session: input.session,
+			bus: input.bus,
+			tools: [],
+			systemPrompt: input.params.definition.systemPrompt,
+			model: input.model,
+			memory: this.deps.memory,
+			memoryProfile: this.deps.memoryProfile,
+			thinking: input.thinking,
+			thinkingResolver: input.thinkingResolver,
+			requestKind: "subagent",
+			maxToolRounds: 0,
+		});
+
+		try {
+			await summaryLoop.run(timeoutSummaryPrompt(input.params.definition), {
+				...input.ctx,
+				signal,
+			});
+		} catch {
+			// Keep whatever streamed before the budget expired.
 		}
 	}
 

@@ -6,6 +6,7 @@ import type {
 } from "../../config/defaults.ts";
 import type { RuntimeThinkingResolver } from "../../config/thinkingRuntime.ts";
 import type { AgentClient } from "../../providers/AgentClient.ts";
+import type { AgentDefinition } from "../agents/AgentDefinition.ts";
 import type { EventBus } from "../bus/EventBus.ts";
 import type { TurnStatus, UsageInfo } from "../bus/events.ts";
 import type { CheckpointRecorder } from "../checkpoints/CheckpointStore.ts";
@@ -15,7 +16,10 @@ import type { PermissionContext } from "../permissions/types.ts";
 import type { Tool } from "../tools/Tool.ts";
 import type { ToolTraceContext } from "../tools/ToolContext.ts";
 
-export type SubAgentToolFactory = (opts: { depth: number }) => Tool[];
+export type SubAgentToolFactory = (opts: {
+	depth: number;
+	definition: AgentDefinition;
+}) => Tool[];
 
 export interface SubAgentRunnerDeps {
 	client: AgentClient;
@@ -24,7 +28,6 @@ export interface SubAgentRunnerDeps {
 	memoryProfile: MemoryProfile;
 	getThinking: () => Promise<ThinkingConfig | null | undefined>;
 	getThinkingResolver?: () => Promise<RuntimeThinkingResolver>;
-	systemPrompt: string;
 	toolFactory: SubAgentToolFactory;
 	isToolEnabled?: (name: string) => boolean;
 	hookController?: HookController;
@@ -34,6 +37,8 @@ export interface SubAgentRunnerDeps {
 
 export interface SubAgentRunParams {
 	prompt: string;
+	/** Resolved agent this run executes as; supplies prompt, model, and limits. */
+	definition: AgentDefinition;
 	depth: number;
 	parentCwd: string;
 	parentSignal: AbortSignal;
@@ -58,9 +63,12 @@ export interface SubAgentRunParams {
 	};
 }
 
+/** Turn outcomes plus budget expiry, which reports partial progress. */
+export type SubAgentStatus = TurnStatus | "timed_out";
+
 export interface SubAgentResult {
 	report: string;
-	status: TurnStatus;
+	status: SubAgentStatus;
 	usage: UsageInfo;
 	toolRounds: number;
 }

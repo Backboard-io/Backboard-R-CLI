@@ -13,6 +13,7 @@ import type {
 } from "../../../providers/backboard/types.ts";
 import { errorMessage } from "../../../utils/errors.ts";
 import type { UsageInfo } from "../../bus/events.ts";
+import { RunBudget } from "../RunBudget.ts";
 import {
 	DEFAULT_RLM_MAX_ITERATIONS,
 	DEFAULT_RLM_MAX_LLM_CALLS,
@@ -59,7 +60,7 @@ export class RLMLoop {
 	async run(params: RLMRunParams): Promise<RLMResult> {
 		const usage: Required<UsageInfo> = blankUsage();
 		const trajectory: RLMTrajectoryEntry[] = [];
-		const budget = RLMBudget.start(params.signal, params.timeoutMs);
+		const budget = RunBudget.start(params.signal, params.timeoutMs);
 		let llmCallCount = 0;
 		const reserveLLMCalls = (count: number): void => {
 			budget.throwIfExpired();
@@ -418,83 +419,4 @@ function buildRunVariables(prompt: string, variables?: JSONObject): JSONObject {
 		task: prompt,
 		...(variables ?? {}),
 	};
-}
-
-class RLMTimeoutError extends Error {
-	constructor(timeoutMs: number) {
-		super(`RLM timed out after ${Math.ceil(timeoutMs / 1000)} seconds`);
-		this.name = "RLMTimeoutError";
-	}
-}
-
-class RLMBudget {
-	private readonly controller = new AbortController();
-	private readonly timeout: ReturnType<typeof setTimeout> | null = null;
-	private readonly abortFromParent: () => void;
-	private readonly deadlineMs: number;
-	private timedOut = false;
-
-	private constructor(
-		private readonly parentSignal: AbortSignal,
-		readonly timeoutMs?: number,
-	) {
-		this.deadlineMs =
-			timeoutMs === undefined
-				? Number.POSITIVE_INFINITY
-				: Date.now() + timeoutMs;
-		this.abortFromParent = (): void => {
-			this.controller.abort(parentSignal.reason);
-		};
-		if (parentSignal.aborted) {
-			this.abortFromParent();
-		} else {
-			parentSignal.addEventListener("abort", this.abortFromParent, {
-				once: true,
-			});
-		}
-
-		if (timeoutMs !== undefined) {
-			this.timeout = setTimeout(() => {
-				this.timedOut = true;
-				this.controller.abort(new RLMTimeoutError(timeoutMs));
-			}, timeoutMs);
-		}
-	}
-
-	static start(parentSignal: AbortSignal, timeoutMs?: number): RLMBudget {
-		return new RLMBudget(parentSignal, timeoutMs);
-	}
-
-	get signal(): AbortSignal {
-		return this.controller.signal;
-	}
-
-	get remainingMs(): number | undefined {
-		if (this.timeoutMs === undefined) return undefined;
-		if (this.timedOut) return 1;
-		return Math.max(1, this.deadlineMs - Date.now());
-	}
-
-	throwIfExpired(): void {
-		if (this.timedOut) {
-			throw new RLMTimeoutError(this.timeoutMs ?? 0);
-		}
-		if (this.signal.aborted && !this.parentSignal.aborted) {
-			throw this.signal.reason instanceof Error
-				? this.signal.reason
-				: new RLMTimeoutError(this.timeoutMs ?? 0);
-		}
-	}
-
-	isTimeoutError(error: Error): boolean {
-		return (
-			error instanceof RLMTimeoutError ||
-			(!this.parentSignal.aborted && this.signal.aborted && this.timedOut)
-		);
-	}
-
-	dispose(): void {
-		if (this.timeout) clearTimeout(this.timeout);
-		this.parentSignal.removeEventListener("abort", this.abortFromParent);
-	}
 }

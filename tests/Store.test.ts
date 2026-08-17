@@ -825,6 +825,43 @@ describe("Store reducer", () => {
 		expect(item.detail).toContain("Found the relevant files");
 	});
 
+	it("previews long Agent reports instead of emitting a raw slice", () => {
+		let state = initialState("gpt-test");
+		state = reduce(state, {
+			type: "tool:start",
+			toolCallId: "call_1",
+			name: "Agent",
+			inputSummary: "inspect",
+		});
+		const report = Array.from(
+			{ length: 60 },
+			(_, i) => `line ${i} ${"x".repeat(300)}`,
+		).join("\n");
+		state = reduce(state, {
+			type: "tool:result",
+			toolCallId: "call_1",
+			name: "Agent",
+			title: "Agent worker (3 rounds)",
+			agentOutput: {
+				mode: "worker",
+				status: "completed",
+				rounds: 3,
+				report,
+			},
+		});
+
+		const item = state.transcript[0];
+		if (item?.kind !== "tool") throw new Error("expected tool item");
+		const lines = (item.detail ?? "").split("\n");
+		// meta line + capped report lines + the "more lines" footer
+		expect(lines).toHaveLength(26);
+		expect(lines[0]).toContain("mode: worker");
+		expect(lines.at(-1)).toBe("… +36 more lines");
+		for (const line of lines.slice(1)) {
+			expect(line.length).toBeLessThanOrEqual(96);
+		}
+	});
+
 	it("tracks live child tool calls under running Agent rows", () => {
 		let state = initialState("gpt-test");
 		state = reduce(state, {

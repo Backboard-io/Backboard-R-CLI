@@ -1,6 +1,7 @@
 import type {
 	AgentChildToolCall,
 	AskUserRequest,
+	BackgroundRunSnapshot,
 	TodoItem,
 	UsageInfo,
 } from "../core/bus/events.ts";
@@ -86,6 +87,8 @@ export interface AppState {
 	pendingAsk: AskUserRequest | null;
 	model: string;
 	permissionMode: PermissionMode;
+	/** Sub-agents still running past the turn that spawned them. */
+	backgroundAgents: BackgroundRunSnapshot[];
 }
 
 export function initialState(
@@ -107,5 +110,6 @@ export function initialState(
 		pendingAsk: null,
 		model,
 		permissionMode,
+		backgroundAgents: [],
 	};
 }

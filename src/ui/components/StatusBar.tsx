@@ -1,6 +1,7 @@
 import { Box, Text } from "ink";
 import type React from "react";
 import type { ThinkingConfig, ThinkingIntent } from "../../config/defaults.ts";
+import type { BackgroundRunSnapshot } from "../../core/bus/events.ts";
 import {
 	type PermissionMode,
 	permissionModeLabel,
@@ -14,12 +15,14 @@ interface Props {
 	model: string;
 	thinking: ThinkingConfig | ThinkingIntent | null | undefined;
 	permissionMode: PermissionMode;
+	backgroundAgents?: readonly BackgroundRunSnapshot[];
 }
 
 export function StatusBar({
 	model,
 	thinking,
 	permissionMode,
+	backgroundAgents = [],
 }: Props): React.ReactElement {
 	const thinkingAmount = formatThinkingAmount(thinking);
 	const uiTheme = useTheme();
@@ -29,23 +32,51 @@ export function StatusBar({
 	const { symbol, color } = permissionModeStyle(permissionMode, secondary);
 	const modeDisplay = `${symbol} ${permissionModeLabel(permissionMode)} mode`;
 	return (
-		<Box marginTop={1}>
-			<Text color={color} bold={permissionMode !== "manual"}>
-				{modeDisplay}
-			</Text>
-			<Text color={secondary}>{STATUS_BAR_SEPARATOR}(shift+tab to cycle)</Text>
-			<Text color={secondary}>
-				{STATUS_BAR_SEPARATOR}
-				{model}
-			</Text>
-			{thinkingAmount ? (
+		<Box marginTop={1} flexDirection="column">
+			<Box>
+				<Text color={color} bold={permissionMode !== "manual"}>
+					{modeDisplay}
+				</Text>
+				<Text color={secondary}>
+					{STATUS_BAR_SEPARATOR}(shift+tab to cycle)
+				</Text>
 				<Text color={secondary}>
 					{STATUS_BAR_SEPARATOR}
-					{thinkingAmount}
+					{model}
 				</Text>
-			) : null}
+				{thinkingAmount ? (
+					<Text color={secondary}>
+						{STATUS_BAR_SEPARATOR}
+						{thinkingAmount}
+					</Text>
+				) : null}
+				{backgroundAgents.length > 0 ? (
+					<Text color={theme.accentBright}>
+						{STATUS_BAR_SEPARATOR}
+						{formatBackgroundSummary(backgroundAgents)}
+					</Text>
+				) : null}
+			</Box>
+			{backgroundAgents.map((run) => (
+				<Text key={run.id} color={secondary}>
+					{`  ↳ ${run.agent}  ${formatElapsed(run.startedAt)}  ${run.label}`}
+				</Text>
+			))}
 		</Box>
 	);
+}
+
+export function formatBackgroundSummary(
+	runs: readonly BackgroundRunSnapshot[],
+): string {
+	return `${runs.length} agent${runs.length === 1 ? "" : "s"} running`;
+}
+
+export function formatElapsed(startedAt: number, now = Date.now()): string {
+	const seconds = Math.max(0, Math.round((now - startedAt) / 1000));
+	if (seconds < 60) return `${seconds}s`;
+	const minutes = Math.floor(seconds / 60);
+	return `${minutes}m${String(seconds % 60).padStart(2, "0")}s`;
 }
 
 function permissionModeStyle(

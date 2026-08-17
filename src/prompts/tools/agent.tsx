@@ -21,7 +21,7 @@ Usage notes:
 
 | Name | Type | Required | Description |
 | --- | --- | --- | --- |
-| \`subagent_type\` | \`string enum: worker, rlm\` | no | "worker" (default) runs a tool-using sub-agent over the project; "rlm" analyzes the prompt and provided variables in a JavaScript REPL. For rlm, put all task detail in prompt, pass structured data through variables when useful, and finish with \`SUBMIT(answer)\`. |
+| \`subagent_type\` | \`string\` | no | Which agent to run; see "Available agents" below. Defaults to \`worker\`, a tool-using sub-agent over the project. \`rlm\` agents instead analyze the prompt and variables in a JavaScript REPL — put all task detail in prompt, pass structured data through variables, and finish with \`SUBMIT(answer)\`. |
 | \`prompt\` | \`string\` | yes | The full delegated prompt, including all task detail, context, and report requirements. |
 | \`variables\` | \`object\` | no | Optional JSON object for rlm sub-agents. Values are available as \`inputs\`; valid non-reserved keys are also direct variables. Use this for file trees, selected file contents, examples, or constraints gathered by the parent. |
 | \`timeout_ms\` | \`number\` | no | Optional wall-clock budget for rlm sub-agents. When the budget expires, the RLM returns a partial-progress report instead of continuing normal code execution. |`,

@@ -9,6 +9,8 @@ import {
 import { Config } from "../config/Config.ts";
 import { parseFlags } from "../config/flags.ts";
 import { AgentController } from "../core/agent/AgentController.ts";
+import { BackgroundAgentSupervisor } from "../core/agent/BackgroundAgentSupervisor.ts";
+import { discoverAgents } from "../core/agents/discovery.ts";
 import { AttachmentManager } from "../core/attachments/AttachmentManager.ts";
 import { sweepStaleClipboardImages } from "../core/attachments/clipboardImage.ts";
 import {
@@ -246,6 +248,11 @@ async function main(): Promise<void> {
 		},
 	});
 	const skillController = new SkillController({ cwd: config.cwd, bus });
+	const backgroundSupervisor = new BackgroundAgentSupervisor(bus);
+	const agentCatalog = await discoverAgents({ cwd: config.cwd });
+	for (const warning of agentCatalog.warnings) {
+		bus.emit({ type: "system:warning", message: warning });
+	}
 	registry = new ToolRegistry(
 		createDefaultTools({
 			client,
@@ -255,6 +262,11 @@ async function main(): Promise<void> {
 			checkpoints,
 			getTools: () => registry.list(),
 			skillController,
+			getAgentCatalog: () => agentCatalog,
+			// Headless runs exit after one prompt, so a backgrounded agent would be
+			// cancelled before reporting — and the model would have been told a
+			// report was coming. Withhold the supervisor so those spawns run inline.
+			...(headless ? {} : { backgroundSupervisor }),
 			// Lazy: mcpController is declared below (it needs `registry`), resolved at call time.
 			getMcpRegistrar: () => mcpController,
 		}),
@@ -348,6 +360,7 @@ async function main(): Promise<void> {
 		hookController,
 		lsp,
 		checkpoints,
+		backgroundSupervisor,
 		getDurableSession: () => sessionLifecycle.current(),
 		onThreadReplaced: (threadId) => sessionLifecycle.replaceThread(threadId),
 		syncDynamicTools: syncMcpToolUpdates,
@@ -356,10 +369,20 @@ async function main(): Promise<void> {
 		getTranscriptPath: () =>
 			sessionPathsForRoot(sessionLifecycle.current().sessionRoot).clientLog,
 	});
+	// Deferred: the supervisor is built before the controller that consumes its
+	// reports. Reports queue at "later" so they never preempt user input.
+	backgroundSupervisor.setNotifier((report) => {
+		void controller.submit(report, {
+			emitUserMessage: false,
+			priority: "later",
+		});
+	});
+
 	const attachmentManager = new AttachmentManager();
 	sweepStaleClipboardImages();
 	const flush = async (): Promise<void> => {
 		try {
+			backgroundSupervisor.cancelAll();
 			await controller.dispose();
 			await lsp.shutdown();
 			await mcpManager.close();

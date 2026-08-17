@@ -10,6 +10,11 @@ const DEFAULT_MAX_LINE_WIDTH = 200;
  */
 export const BROWSING_PREVIEW_LINES = 6;
 
+/** Sub-agent reports are the whole point of the call, so show more of them. */
+export const AGENT_REPORT_PREVIEW_LINES = 24;
+/** Kept near the transcript's render width so lines are cut once, not twice. */
+export const AGENT_REPORT_PREVIEW_WIDTH = 96;
+
 export interface OutputPreviewOptions {
 	/** Maximum number of content lines to keep before collapsing the rest. */
 	maxLines?: number;

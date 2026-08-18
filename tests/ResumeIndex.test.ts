@@ -1,10 +1,11 @@
 import { describe, expect, it } from "bun:test";
-import { mkdtemp } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import {
 	lookupResumeEntry,
 	registerResumeIds,
+	resumeIndexPath,
 } from "../src/core/session/ResumeIndex.ts";
 
 describe("resume index", () => {
@@ -43,6 +44,90 @@ describe("resume index", () => {
 		expect((await lookupResumeEntry("sess_22222222", homeDir))?.cwd).toBe(
 			"/two",
 		);
+	});
+
+	it("preserves the thread mapping during session-only registration", async () => {
+		const homeDir = await mkdtemp(join(tmpdir(), "resume-index-home-"));
+		await registerResumeIds(
+			{
+				cwd: "/workspace",
+				sessionId: "sess_1234abcd",
+				threadId: "thread_remote",
+			},
+			homeDir,
+		);
+		await registerResumeIds(
+			{ cwd: "/workspace", sessionId: "sess_1234abcd" },
+			homeDir,
+		);
+		expect(await lookupResumeEntry("sess_1234abcd", homeDir)).toMatchObject({
+			threadId: "thread_remote",
+		});
+	});
+
+	it("clears the previous session owner when a thread alias moves", async () => {
+		const homeDir = await mkdtemp(join(tmpdir(), "resume-index-home-"));
+		await registerResumeIds(
+			{
+				cwd: "/workspace",
+				sessionId: "sess_11111111",
+				threadId: "thread_remote",
+			},
+			homeDir,
+		);
+		await registerResumeIds(
+			{
+				cwd: "/workspace",
+				sessionId: "sess_22222222",
+				threadId: "thread_remote",
+			},
+			homeDir,
+		);
+		expect(
+			(await lookupResumeEntry("sess_11111111", homeDir))?.threadId,
+		).toBeUndefined();
+		expect(await lookupResumeEntry("thread_remote", homeDir)).toMatchObject({
+			sessionId: "sess_22222222",
+		});
+	});
+
+	it("ignores entries with unsafe session IDs or relative workspaces", async () => {
+		const homeDir = await mkdtemp(join(tmpdir(), "resume-index-home-"));
+		await mkdir(join(homeDir, ".backboard"), { recursive: true });
+		await writeFile(
+			resumeIndexPath(homeDir),
+			JSON.stringify({
+				version: 1,
+				entries: {
+					byok_deadbeef: {
+						cwd: "/workspace",
+						sessionId: "../../../../etc",
+						threadId: "byok_deadbeef",
+						updatedAt: "2026-08-18T10:00:00Z",
+					},
+					sess_1234abcd: {
+						cwd: "relative/workspace",
+						sessionId: "sess_1234abcd",
+						updatedAt: "2026-08-18T10:00:00Z",
+					},
+				},
+			}),
+		);
+		expect(await lookupResumeEntry("byok_deadbeef", homeDir)).toBeNull();
+		expect(await lookupResumeEntry("sess_1234abcd", homeDir)).toBeNull();
+	});
+
+	it("rejects invalid IDs before writing the index", async () => {
+		const homeDir = await mkdtemp(join(tmpdir(), "resume-index-home-"));
+		await expect(
+			registerResumeIds(
+				{ cwd: "/workspace", sessionId: "../../../../etc" },
+				homeDir,
+			),
+		).rejects.toThrow("Invalid local session ID");
+		expect(
+			await readFile(resumeIndexPath(homeDir), "utf8").catch(() => ""),
+		).toBe("");
 	});
 
 	it("ignores missing and malformed index files", async () => {

@@ -50,6 +50,7 @@ import {
 	formatMcpResourceForUser,
 	resourceTemplateVariables,
 } from "../core/mcp/index.ts";
+import { lookupResumeEntry } from "../core/session/ResumeIndex.ts";
 import type {
 	SkillController,
 	SkillInstallTarget,
@@ -188,6 +189,7 @@ interface Props {
 	onNewSession: () => Promise<void>;
 	onResumeLocalSession: (sessionId: string) => Promise<void>;
 	onResumeRemoteSession: () => Promise<void>;
+	getActiveSessionId: () => string;
 	onExit: () => void;
 }
 
@@ -271,6 +273,7 @@ export function App({
 	onNewSession,
 	onResumeLocalSession,
 	onResumeRemoteSession,
+	getActiveSessionId,
 	onExit,
 }: Props): React.ReactElement {
 	const app = useApp();
@@ -1044,7 +1047,6 @@ export function App({
 					controller,
 					onResumeLocalSession,
 					onResumeRemoteSession,
-					onWarning: (message) => agent.notice(message, "error"),
 				});
 				if (stdout.isTTY) write(CLEAR_VISIBLE_SCREEN);
 				agent.setModelLabel(config.modelString);
@@ -1083,16 +1085,30 @@ export function App({
 	);
 	const resumeSessionById = useCallback(
 		(id: string) => {
-			if (isAlreadyActiveResume(id, controller.threadId)) {
+			if (
+				isAlreadyActiveResume(id, controller.threadId, getActiveSessionId())
+			) {
 				agent.notice("That session is already active.");
 				setMode("normal");
 				return Promise.resolve();
 			}
-			return applyResumeTarget(() =>
-				resolveResumeTarget(client, config.cwd, id),
+			return applyResumeTarget(async () =>
+				resolveResumeTarget(
+					client,
+					config.cwd,
+					id,
+					await lookupResumeEntry(id),
+				),
 			);
 		},
-		[agent, applyResumeTarget, client, config.cwd, controller.threadId],
+		[
+			agent,
+			applyResumeTarget,
+			client,
+			config.cwd,
+			controller.threadId,
+			getActiveSessionId,
+		],
 	);
 
 	const performRestore = useCallback(

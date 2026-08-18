@@ -90,5 +90,19 @@ describe("resolveLocalResumeBootstrap", () => {
 		expect(isRemoteResumeId("byok_deadbeef")).toBe(false);
 		expect(isRemoteResumeId("sess_deadbeef")).toBe(false);
 		expect(isRemoteResumeId(" ")).toBe(false);
+		expect(isLocalResumeId("SESS_DEADBEEF")).toBe(false);
+		expect(isLocalResumeId("sess_DEADBEEF")).toBe(false);
+		expect(isLocalResumeId("sess_deadbegg")).toBe(false);
+	});
+
+	it("ignores an unsafe indexed session hint", async () => {
+		const cwd = await mkdtemp(join(tmpdir(), "resume-bootstrap-"));
+		expect(
+			await resolveLocalResumeBootstrap(
+				cwd,
+				"byok_deadbeef",
+				"../../../../etc",
+			),
+		).toBeNull();
 	});
 });

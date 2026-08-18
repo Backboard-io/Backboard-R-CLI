@@ -1,8 +1,9 @@
-import { mkdir, readFile } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { readFile } from "node:fs/promises";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { qUserConfigDir } from "../../config/paths.ts";
 import { acquireFileLease } from "../../utils/FileLease.ts";
-import { writePrivateFileAtomic } from "../../utils/fs.ts";
+import { ensureDir, writePrivateFileAtomic } from "../../utils/fs.ts";
+import { isSessionId } from "../../utils/id.ts";
 
 const RESUME_INDEX_VERSION = 1;
 const RESUME_INDEX_FILE = "session-index.json";
@@ -38,8 +39,15 @@ export async function registerResumeIds(
 	},
 	homeDir?: string,
 ): Promise<void> {
+	if (!isSessionId(input.sessionId)) {
+		throw new Error(`Invalid local session ID: ${input.sessionId}`);
+	}
+	const requestedThreadId = input.threadId?.trim() || undefined;
+	if (input.threadId !== undefined && input.threadId !== null) {
+		if (!requestedThreadId) throw new Error("Thread ID cannot be empty.");
+	}
 	const path = resumeIndexPath(homeDir);
-	await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+	await ensureDir(dirname(path), 0o700);
 	const lease = await acquireFileLease(`${path}${RESUME_INDEX_LEASE_SUFFIX}`, {
 		label: "session resume index",
 		timeoutMs: 5_000,
@@ -48,14 +56,32 @@ export async function registerResumeIds(
 	});
 	try {
 		const file = await readResumeIndex(homeDir);
+		const existing = file.entries[input.sessionId];
+		const threadId = requestedThreadId ?? existing?.threadId;
+		const previousOwner = threadId ? file.entries[threadId] : undefined;
+		if (
+			previousOwner &&
+			previousOwner.sessionId !== input.sessionId &&
+			file.entries[previousOwner.sessionId]?.threadId === threadId
+		) {
+			const previousSession = file.entries[previousOwner.sessionId];
+			if (previousSession) {
+				const { threadId: _previousThreadId, ...localOnlyEntry } =
+					previousSession;
+				file.entries[previousOwner.sessionId] = localOnlyEntry;
+			}
+		}
 		const entry: ResumeIndexEntry = {
 			cwd: resolve(input.cwd),
 			sessionId: input.sessionId,
-			...(input.threadId ? { threadId: input.threadId } : {}),
+			...(threadId ? { threadId } : {}),
 			updatedAt: new Date().toISOString(),
 		};
+		if (existing?.threadId && existing.threadId !== threadId) {
+			delete file.entries[existing.threadId];
+		}
 		file.entries[input.sessionId] = entry;
-		if (input.threadId) file.entries[input.threadId] = entry;
+		if (threadId) file.entries[threadId] = entry;
 		await writeResumeIndex(path, file);
 	} finally {
 		await lease.release();
@@ -84,7 +110,7 @@ async function readResumeIndex(homeDir?: string): Promise<ResumeIndexFile> {
 		}
 		const entries: Record<string, ResumeIndexEntry> = {};
 		for (const [id, entry] of Object.entries(value.entries)) {
-			if (isResumeIndexEntry(entry)) entries[id] = entry;
+			if (isResumeIndexEntry(id, entry)) entries[id] = entry;
 		}
 		return { version: RESUME_INDEX_VERSION, entries };
 	} catch {
@@ -103,18 +129,32 @@ function emptyIndex(): ResumeIndexFile {
 	return { version: RESUME_INDEX_VERSION, entries: {} };
 }
 
-function isResumeIndexEntry(value: unknown): value is ResumeIndexEntry {
-	return (
+function isResumeIndexEntry(
+	id: string,
+	value: unknown,
+): value is ResumeIndexEntry {
+	if (
 		typeof value === "object" &&
 		value !== null &&
 		"cwd" in value &&
 		typeof value.cwd === "string" &&
+		isAbsolute(value.cwd) &&
 		"sessionId" in value &&
 		typeof value.sessionId === "string" &&
+		isSessionId(value.sessionId) &&
 		"updatedAt" in value &&
 		typeof value.updatedAt === "string" &&
 		(!("threadId" in value) ||
 			value.threadId === undefined ||
 			typeof value.threadId === "string")
-	);
+	) {
+		const threadId =
+			"threadId" in value && typeof value.threadId === "string"
+				? value.threadId
+				: undefined;
+		return isSessionId(id)
+			? id === value.sessionId
+			: threadId !== undefined && threadId.length > 0 && id === threadId;
+	}
+	return false;
 }

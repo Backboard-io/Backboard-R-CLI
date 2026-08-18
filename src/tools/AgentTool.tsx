@@ -438,7 +438,7 @@ function agentToolParameters(agentNames: string[]): Record<string, unknown> {
 				type: "integer",
 				minimum: 1,
 				description:
-					"Optional wall-clock budget in milliseconds for RLM sub-agents.",
+					"Optional wall-clock budget in milliseconds. On expiry a worker moves to the background and keeps going; an rlm returns partial progress.",
 			},
 		},
 		required: ["prompt"],

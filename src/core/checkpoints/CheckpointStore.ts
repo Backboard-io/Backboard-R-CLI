@@ -86,6 +86,41 @@ export interface CheckpointRecorder {
 	scopedToTurn(turnId: string): CheckpointRecorder;
 }
 
+export interface RevocableRecorder {
+	recorder: CheckpointRecorder;
+	revoke: () => void;
+}
+
+/**
+ * Wraps a recorder so journaling can be switched off after contexts holding it
+ * have already been copied. Used when a run outlives the turn it was scoped to.
+ */
+export function revocableRecorder(
+	recorder: CheckpointRecorder,
+): RevocableRecorder {
+	let live = true;
+	const noop = async (): Promise<void> => {};
+	return {
+		revoke: () => {
+			live = false;
+		},
+		recorder: {
+			recordPreImage: (...args) =>
+				live ? recorder.recordPreImage(...args) : noop(),
+			recordPostImage: (...args) =>
+				live ? recorder.recordPostImage(...args) : noop(),
+			revertToolCall: (...args) =>
+				live ? recorder.revertToolCall(...args) : noop(),
+			beginShellCapture: (...args) =>
+				live ? recorder.beginShellCapture(...args) : noop(),
+			endShellCapture: (...args) =>
+				live ? recorder.endShellCapture(...args) : noop(),
+			captureWarning: () => (live ? recorder.captureWarning() : null),
+			scopedToTurn: (turnId) => recorder.scopedToTurn(turnId),
+		},
+	};
+}
+
 export function scopeCheckpointRecorder(
 	recorder: CheckpointRecorder,
 	turnId: string,

@@ -2,6 +2,7 @@ import type { ModelRef, ThinkingConfig } from "../../config/defaults.ts";
 import type { RuntimeThinkingResolver } from "../../config/thinkingRuntime.ts";
 import { shortId } from "../../utils/id.ts";
 import { EventBus } from "../bus/EventBus.ts";
+import { revocableRecorder } from "../checkpoints/CheckpointStore.ts";
 import { emptyRuleSet } from "../permissions/PermissionRules.ts";
 import { ClientEventLog } from "../session/ClientEventLog.ts";
 import { Session } from "../session/Session.ts";
@@ -112,9 +113,11 @@ export class SubAgentRunner {
 		// turn to attribute to, capture is disabled rather than journaling
 		// entries no checkpoint could ever surface.
 		const parentRecorder = params.checkpoints ?? this.deps.checkpoints;
-		const checkpoints = params.parentTurnId
+		const scoped = params.parentTurnId
 			? parentRecorder?.scopedToTurn(params.parentTurnId)
 			: undefined;
+		const revocable = scoped ? revocableRecorder(scoped) : undefined;
+		const checkpoints = revocable?.recorder;
 
 		// A budget bounds how long someone waits. With a handoff, or once the
 		// chain is already backgrounded, nobody is: expiry must not abort.
@@ -229,6 +232,7 @@ export class SubAgentRunner {
 		handedOff = true;
 		budget.detachFromParent();
 		detachParentProgress();
+		revocable?.revoke();
 		return {
 			report: HANDED_OFF_REPORT,
 			status: "backgrounded",
@@ -266,7 +270,7 @@ export class SubAgentRunner {
 			session: input.session,
 			bus: input.bus,
 			tools: [],
-			systemPrompt: input.params.definition.systemPrompt,
+			systemPrompt: subAgentSystemPrompt(input.params.definition.systemPrompt),
 			model: input.model,
 			memory: this.deps.memory,
 			memoryProfile: this.deps.memoryProfile,

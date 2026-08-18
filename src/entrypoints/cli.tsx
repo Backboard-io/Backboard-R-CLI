@@ -381,11 +381,7 @@ async function main(): Promise<void> {
 	// reports. Reports queue at "later" so they never preempt user input.
 	backgroundSupervisor.setNotifier((report) => {
 		void controller
-			.submit(report, {
-				emitUserMessage: false,
-				priority: "later",
-				displayContent: report,
-			})
+			.submit(report, { emitUserMessage: false, priority: "later" })
 			.catch(() => {});
 	});
 

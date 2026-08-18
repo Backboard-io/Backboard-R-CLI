@@ -169,6 +169,13 @@ Or point it at a project explicitly:
 backboard --cwd /path/to/your/project
 ```
 
+Resume a saved Backboard or local BYOK session by the ID shown when the CLI
+exits or in `/sessions`:
+
+```sh
+backboard --resume SESSION_ID
+```
+
 Then enter a normal request:
 
 ```text
@@ -259,7 +266,8 @@ Type `/help` inside R-CLI for the authoritative command list.
 | `/model`                    | Choose a model and thinking mode           |
 | `/settings`                 | Adjust session preferences                 |
 | `/keys`                     | Manage direct provider API keys            |
-| `/sessions`                 | Resume a Backboard or local BYOK session   |
+| `/sessions`, `/session`     | Browse Backboard and local BYOK sessions   |
+| `/resume SESSION_ID`        | Resume a session directly by ID            |
 | `/context`                  | Inspect context-window usage               |
 | `/compress`                 | Compress the current conversation          |
 | `/undo`, `/redo`, `/rewind` | Restore checkpointed file changes          |

@@ -7,6 +7,7 @@ import {
 	truncate,
 } from "../../providers/backboard/threads.ts";
 import type { BackboardThread } from "../../providers/backboard/types.ts";
+import { BYOK_SESSION_ID_METADATA_KEY } from "../../providers/byok/ByokClient.ts";
 import { formatClockTime } from "../../utils/time.ts";
 import { Picker, type PickerTab } from "./Picker.tsx";
 
@@ -32,7 +33,7 @@ export function SessionsSelector({
 	);
 }
 
-function sessionTabs(
+export function sessionTabs(
 	threads: readonly BackboardThread[],
 ): PickerTab<BackboardThread>[] {
 	return [
@@ -43,11 +44,21 @@ function sessionTabs(
 				id: thread.thread_id,
 				name: compactSessionTitle(threadDisplayTitle(thread)),
 				description: formatUpdatedAt(threadUpdatedAt(thread)) ?? "",
-				badge: sessionMessageCount(thread),
+				badge: `${compactSessionId(thread.thread_id)} · ${sessionMessageCount(thread)}`,
+				detail: localSessionId(thread),
 				value: thread,
 			})),
 		},
 	];
+}
+
+function compactSessionId(id: string): string {
+	return id.length <= 14 ? id : `${id.slice(0, 11)}…`;
+}
+
+function localSessionId(thread: BackboardThread): string {
+	const value = thread.metadata_?.[BYOK_SESSION_ID_METADATA_KEY];
+	return typeof value === "string" ? value : "";
 }
 
 function sessionMessageCount(thread: BackboardThread): string {

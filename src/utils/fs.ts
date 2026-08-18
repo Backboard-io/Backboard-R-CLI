@@ -1,11 +1,14 @@
 import { randomUUID } from "node:crypto";
 import {
 	appendFile,
+	chmod,
 	mkdir,
 	readFile,
 	rename,
+	rm,
 	stat,
 	unlink,
+	writeFile,
 } from "node:fs/promises";
 import { dirname } from "node:path";
 
@@ -35,6 +38,22 @@ export async function fileExists(path: string): Promise<boolean> {
 
 export async function readUtf8(path: string): Promise<string> {
 	return readFile(path, "utf8");
+}
+
+export async function writePrivateFileAtomic(
+	path: string,
+	content: string,
+): Promise<void> {
+	const temporary = `${path}.tmp-${process.pid}-${Date.now()}-${randomUUID()}`;
+	try {
+		await writeFile(temporary, content, { mode: 0o600 });
+		await chmod(temporary, 0o600).catch(() => undefined);
+		await renameOverPreservingDestination(temporary, path);
+		await chmod(path, 0o600).catch(() => undefined);
+	} catch (error) {
+		await rm(temporary, { force: true }).catch(() => undefined);
+		throw error;
+	}
 }
 
 export async function fileSize(path: string): Promise<number> {

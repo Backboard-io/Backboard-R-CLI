@@ -92,6 +92,7 @@ export interface AskUserResponse {
  */
 export type AgentEvent =
 	| { type: "session:created"; sessionId: string; threadId: string | null }
+	| { type: "session:thread"; threadId: string }
 	| { type: "user:message"; text: string }
 	| { type: "turn:start"; turnId: string }
 	| { type: "assistant:delta"; turnId: string; messageId: string; text: string }

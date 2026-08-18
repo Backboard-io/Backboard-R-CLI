@@ -20,7 +20,7 @@ export type Command =
 	| { type: "discover" }
 	| { type: "hooks" }
 	| { type: "skills" }
-	| { type: "sessions" }
+	| { type: "sessions"; id?: string }
 	| { type: "notify" }
 	| { type: "verbose" }
 	| { type: "update" }
@@ -114,7 +114,7 @@ export const SLASH_COMMANDS: readonly SlashCommandDefinition[] = [
 		name: "sessions",
 		type: "sessions",
 		description: "Resume a session",
-		aliases: ["resume", "continue"],
+		aliases: ["session", "resume", "continue"],
 	},
 	{ name: "login", type: "login", description: "Sign in with Backboard" },
 	{
@@ -190,9 +190,14 @@ export function parseCommand(input: string): Command {
 	}
 
 	const withoutSlash = trimmed.slice(1);
-	const name = withoutSlash.split(/\s+/)[0]?.toLowerCase() ?? "";
+	const [rawName = "", ...rawArgs] = withoutSlash.split(/\s+/);
+	const name = rawName.toLowerCase();
 	const definition = findSlashCommand(name);
 	if (definition) {
+		if (definition.type === "sessions") {
+			const id = rawArgs.join(" ").trim();
+			return id ? { type: "sessions", id } : { type: "sessions" };
+		}
 		return { type: definition.type };
 	}
 	// Filepath-like input (e.g. /a/b/c) is not a command; send it as a

@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import { quotePowerShellString } from "../../utils/shell.ts";
 import { BasePlatform } from "./BasePlatform.ts";
 import { pngSize, resizeWithCandidates } from "./png.ts";
 import { run, runWithOutput } from "./process.ts";
@@ -22,7 +23,7 @@ export class WindowsPlatform extends BasePlatform {
 			"$bmp=New-Object System.Drawing.Bitmap $b.Width,$b.Height;",
 			"$g=[System.Drawing.Graphics]::FromImage($bmp);",
 			"$g.CopyFromScreen($b.Location,[System.Drawing.Point]::Empty,$b.Size);",
-			`$bmp.Save(${powershellString(path)},[System.Drawing.Imaging.ImageFormat]::Png);`,
+			`$bmp.Save(${quotePowerShellString(path)},[System.Drawing.Imaging.ImageFormat]::Png);`,
 			"$g.Dispose();$bmp.Dispose();",
 		].join("");
 		await run("powershell.exe", ["-NoProfile", "-Command", script], signal);
@@ -65,7 +66,7 @@ export class WindowsPlatform extends BasePlatform {
 					[
 						"-NoProfile",
 						"-Command",
-						`Start-Process ${powershellString(action.appName)}`,
+						`Start-Process ${quotePowerShellString(action.appName)}`,
 					],
 					signal,
 				);
@@ -98,13 +99,13 @@ export class WindowsPlatform extends BasePlatform {
 		return resizeWithCandidates(input, async (width, out) => {
 			const script = [
 				"Add-Type -AssemblyName System.Drawing;",
-				`$src=[System.Drawing.Image]::FromFile(${powershellString(input.path)});`,
+				`$src=[System.Drawing.Image]::FromFile(${quotePowerShellString(input.path)});`,
 				`$w=${width};`,
 				"$h=[int]($src.Height*($w/$src.Width));",
 				"$bmp=New-Object System.Drawing.Bitmap $w,$h;",
 				"$g=[System.Drawing.Graphics]::FromImage($bmp);",
 				"$g.DrawImage($src,0,0,$w,$h);",
-				`$bmp.Save(${powershellString(out)},[System.Drawing.Imaging.ImageFormat]::Png);`,
+				`$bmp.Save(${quotePowerShellString(out)},[System.Drawing.Imaging.ImageFormat]::Png);`,
 				"$g.Dispose();$bmp.Dispose();$src.Dispose();",
 			].join("");
 			await run(
@@ -114,10 +115,6 @@ export class WindowsPlatform extends BasePlatform {
 			);
 		});
 	}
-}
-
-function powershellString(value: string): string {
-	return `'${value.replaceAll("'", "''")}'`;
 }
 
 const WINDOWS_ACCESSIBILITY_SCRIPT = [

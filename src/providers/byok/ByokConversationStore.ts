@@ -111,7 +111,7 @@ export class ByokConversationStore {
 
 	async getAtSessionRoot(
 		sessionRoot: string,
-		threadId: string,
+		threadId?: string,
 		options: { repairInterruptedToolTurn?: boolean } = {},
 	): Promise<StoredByokConversation | null> {
 		const conversation = await this.readPath(
@@ -120,7 +120,7 @@ export class ByokConversationStore {
 		);
 		if (
 			!conversation ||
-			conversation.threadId !== threadId ||
+			(threadId !== undefined && conversation.threadId !== threadId) ||
 			basename(sessionRoot) !== conversation.sessionId
 		) {
 			return null;

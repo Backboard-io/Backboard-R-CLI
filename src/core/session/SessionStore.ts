@@ -63,9 +63,13 @@ export class SessionStore {
 	}
 
 	async init(meta: SessionMeta): Promise<void> {
+		await this.open();
+		await writeFile(this.paths.meta, JSON.stringify(meta, null, 2), "utf8");
+	}
+
+	async open(): Promise<void> {
 		await ensureDir(this.paths.root);
 		await ensureDir(this.paths.checkpoints);
 		await ensureDir(this.paths.checkpointObjects);
-		await writeFile(this.paths.meta, JSON.stringify(meta, null, 2), "utf8");
 	}
 }

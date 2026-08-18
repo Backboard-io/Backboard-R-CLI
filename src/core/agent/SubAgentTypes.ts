@@ -40,6 +40,8 @@ export interface SubAgentRunParams {
 	prompt: string;
 	definition: AgentDefinition;
 	depth: number;
+	/** Per-call override of the definition's budget. */
+	timeoutMs?: number;
 	parentCwd: string;
 	parentSignal: AbortSignal;
 	parentBus?: EventBus;

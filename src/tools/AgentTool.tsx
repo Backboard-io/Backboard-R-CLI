@@ -120,12 +120,6 @@ export class AgentTool extends Tool<AgentToolInput, AgentToolOutput> {
 
 	constructor(private readonly deps: AgentToolDeps) {
 		super();
-		// A chain holds one permit per level, so fewer permits than levels deadlocks.
-		if (deps.maxConcurrent < deps.maxDepth) {
-			throw new Error(
-				`AgentTool requires maxConcurrent (${deps.maxConcurrent}) >= maxDepth (${deps.maxDepth}) to avoid deadlocking nested spawns.`,
-			);
-		}
 		this.slots = new Semaphore(deps.maxConcurrent);
 	}
 
@@ -247,14 +241,9 @@ export class AgentTool extends Tool<AgentToolInput, AgentToolOutput> {
 		);
 	}
 
-	private async runRlm({
-		input,
-		ctx,
-		definition,
-		trace,
-		tracePath,
-	}: AgentRun): Promise<ToolResult<AgentToolOutput>> {
-		const result = await this.slots.run(() =>
+	private async runRlm(run: AgentRun): Promise<ToolResult<AgentToolOutput>> {
+		const { input, ctx, definition, trace, tracePath } = run;
+		const result = await this.gated(run, () =>
 			this.deps.createRLMLoop().run({
 				prompt: input.prompt,
 				signal: ctx.signal,
@@ -303,6 +292,7 @@ export class AgentTool extends Tool<AgentToolInput, AgentToolOutput> {
 			depth,
 			parentCwd: ctx.cwd,
 			parentSignal: signal,
+			...(input.timeout_ms ? { timeoutMs: input.timeout_ms } : {}),
 			...(foreground
 				? {
 						parentBus: ctx.bus,
@@ -339,9 +329,19 @@ export class AgentTool extends Tool<AgentToolInput, AgentToolOutput> {
 		});
 	}
 
+	/**
+	 * Only top-level spawns take a permit. A permit holder must never wait on
+	 * another permit: N parallel chains would each hold one and block forever on
+	 * their descendants. Depth is capped, so the tree stays bounded regardless.
+	 */
+	private gated<T>(run: AgentRun, fn: () => Promise<T>): Promise<T> {
+		if (run.depth > 1) return fn();
+		return this.slots.run(fn, run.ctx.signal);
+	}
+
 	private async runWorker(run: AgentRun): Promise<ToolResult<AgentToolOutput>> {
 		const { ctx, tracePath } = run;
-		const result: SubAgentResult = await this.slots.run(() =>
+		const result: SubAgentResult = await this.gated(run, () =>
 			this.runWorkerAgainst(run, ctx.signal),
 		);
 

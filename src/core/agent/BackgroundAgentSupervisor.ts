@@ -168,12 +168,12 @@ export class BackgroundAgentSupervisor {
 			run: run.snapshot,
 		});
 
-		// A cancelled run was stopped deliberately; re-entering the loop to
-		// announce it would talk over whatever the user cancelled it for.
+		const snapshot = run.snapshot;
+		this.runs.delete(id);
 		if (wasCancelled) return;
 		this.notifier?.(
 			backgroundReportMessage(
-				run.snapshot,
+				snapshot,
 				result?.report ?? failure ?? "",
 				result?.children ?? [],
 			),

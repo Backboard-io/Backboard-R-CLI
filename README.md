@@ -344,7 +344,7 @@ Save that as `.backboard/agents/researcher.md` and the agent can call it with
 | `model`           | inherits session | `provider/model`, or `inherit`                                |
 | `maxRounds`       | `20`             | Tool rounds before the sub-agent is stopped                   |
 | `timeoutMs`       | none             | Wall-clock budget — see "Time budgets" below                  |
-| `background`      | `false`          | Run past the current turn — see "Background agents" below     |
+| `background`      | `false`          | Run past the current turn — worker agents only, see below      |
 
 Project files take precedence over personal ones, and both override the
 built-in `worker` and `rlm` agents if they reuse those names. Files that fail
@@ -376,6 +376,10 @@ Where a handoff is impossible — a nested sub-agent, or a headless run, neither
 of which has anywhere to deliver a later report — expiry instead stops the run
 and spends one short tool-less turn asking what it established, returning
 `status: timed_out` with a partial answer.
+
+Inside a chain that already moved to the background, budgets stop applying
+entirely: nothing is waiting, so a nested run finishes and reports to its parent
+normally. `maxRounds` still bounds it.
 
 A budget is separate from `maxRounds`: rounds bound how many times the agent may
 call tools, the budget bounds wall-clock time. Rounds always end a run; the

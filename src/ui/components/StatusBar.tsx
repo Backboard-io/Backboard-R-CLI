@@ -1,5 +1,6 @@
 import { Box, Text } from "ink";
 import type React from "react";
+import { useEffect, useState } from "react";
 import type { ThinkingConfig, ThinkingIntent } from "../../config/defaults.ts";
 import type { BackgroundRunSnapshot } from "../../core/bus/events.ts";
 import {
@@ -25,6 +26,7 @@ export function StatusBar({
 	backgroundAgents = [],
 }: Props): React.ReactElement {
 	const thinkingAmount = formatThinkingAmount(thinking);
+	const now = useTicker(backgroundAgents.length > 0);
 	const uiTheme = useTheme();
 	const secondary = uiTheme.readableSecondaryText;
 	// Every mode gets a leading glyph: ⏸ for manual (pauses to ask you), ⏵⏵ for
@@ -59,11 +61,21 @@ export function StatusBar({
 			</Box>
 			{backgroundAgents.map((run) => (
 				<Text key={run.id} color={secondary}>
-					{`  ↳ ${run.agent}  ${formatElapsed(run.startedAt)}  ${run.label}`}
+					{`  ↳ ${run.agent}  ${formatElapsed(run.startedAt, now)}  ${run.label}`}
 				</Text>
 			))}
 		</Box>
 	);
+}
+
+function useTicker(active: boolean): number {
+	const [now, setNow] = useState(() => Date.now());
+	useEffect(() => {
+		if (!active) return;
+		const id = setInterval(() => setNow(Date.now()), 1000);
+		return () => clearInterval(id);
+	}, [active]);
+	return now;
 }
 
 export function formatBackgroundSummary(

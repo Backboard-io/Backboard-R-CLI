@@ -121,7 +121,7 @@ export class SubAgentRunner {
 		const noWaiter = params.parentInBackground === true;
 		const budget = RunBudget.start(
 			params.parentSignal,
-			params.definition.timeoutMs,
+			params.timeoutMs ?? params.definition.timeoutMs,
 			{ abortOnExpiry: !canHandOff && !noWaiter },
 		);
 

@@ -239,9 +239,11 @@ async function main(): Promise<void> {
 	// MCP init warnings (unset env vars, skipped/failed servers) are deliberately
 	// kept out of the startup surface — they cluttered every launch. Server status
 	// is still inspectable via /mcp; only the noisy startup emission is dropped.
+	const agentCatalog = await discoverAgents({ cwd: config.cwd });
 	const startupWarnings = [
 		...hookConfig.warnings,
 		...permissionWarnings,
+		...agentCatalog.warnings,
 		...renderWarnings,
 	];
 	for (const warning of startupWarnings) {
@@ -259,10 +261,6 @@ async function main(): Promise<void> {
 	});
 	const skillController = new SkillController({ cwd: config.cwd, bus });
 	const backgroundSupervisor = new BackgroundAgentSupervisor(bus);
-	const agentCatalog = await discoverAgents({ cwd: config.cwd });
-	for (const warning of agentCatalog.warnings) {
-		bus.emit({ type: "system:warning", message: warning });
-	}
 	registry = new ToolRegistry(
 		createDefaultTools({
 			client,
@@ -382,10 +380,13 @@ async function main(): Promise<void> {
 	// Deferred: the supervisor is built before the controller that consumes its
 	// reports. Reports queue at "later" so they never preempt user input.
 	backgroundSupervisor.setNotifier((report) => {
-		void controller.submit(report, {
-			emitUserMessage: false,
-			priority: "later",
-		});
+		void controller
+			.submit(report, {
+				emitUserMessage: false,
+				priority: "later",
+				displayContent: report,
+			})
+			.catch(() => {});
 	});
 
 	const attachmentManager = new AttachmentManager();

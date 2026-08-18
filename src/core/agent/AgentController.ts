@@ -272,7 +272,7 @@ export class AgentController {
 		try {
 			while (this.queue.length > 0) {
 				const queued = this.takeNextSubmit();
-				if (!queued) continue;
+				if (!queued) break;
 				try {
 					queued.onStart?.();
 					queued.resolve(

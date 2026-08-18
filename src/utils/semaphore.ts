@@ -8,10 +8,7 @@ export class SemaphoreAbortError extends Error {
 /** Caps concurrent holders. Acquisitions are granted FIFO. */
 export class Semaphore {
 	private available: number;
-	private readonly waiting: Array<{
-		grant: () => void;
-		reject: (err: Error) => void;
-	}> = [];
+	private readonly waiting: Array<{ grant: () => void }> = [];
 
 	constructor(permits: number) {
 		if (!Number.isInteger(permits) || permits < 1) {
@@ -41,7 +38,6 @@ export class Semaphore {
 					signal?.removeEventListener("abort", onAbort);
 					resolve();
 				},
-				reject,
 			};
 			const onAbort = (): void => {
 				const index = this.waiting.indexOf(entry);

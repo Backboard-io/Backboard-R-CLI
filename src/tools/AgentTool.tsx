@@ -9,10 +9,7 @@ import type {
 import type { AgentDefinition } from "../core/agents/AgentDefinition.ts";
 import { WORKER_AGENT_NAME } from "../core/agents/builtin.ts";
 import type { PermissionDecision } from "../core/permissions/types.ts";
-import {
-	formatSpawnTree,
-	type SpawnedAgent,
-} from "../core/tools/AgentToolOutput.ts";
+import { formatSpawnTree } from "../core/tools/AgentToolOutput.ts";
 import type { OpenAITool } from "../core/tools/schema.ts";
 import { Tool } from "../core/tools/Tool.ts";
 import type { ToolContext } from "../core/tools/ToolContext.ts";
@@ -80,7 +77,7 @@ const schema = z.object({
 		.positive()
 		.optional()
 		.describe(
-			"Optional wall-clock budget for rlm sub-agents. When the budget expires, the RLM returns a partial-progress report instead of continuing normal code execution.",
+			"Optional wall-clock budget for this run. On expiry a worker moves to the background and keeps going; an rlm returns a partial-progress report.",
 		),
 });
 

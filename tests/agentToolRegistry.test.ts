@@ -7,10 +7,6 @@ import { BUILT_IN_AGENTS } from "../src/core/agents/builtin.ts";
 import { EventBus } from "../src/core/bus/EventBus.ts";
 import type { ToolContext } from "../src/core/tools/ToolContext.ts";
 import { AgentTool } from "../src/tools/AgentTool.tsx";
-import {
-	DEFAULT_AGENT_MAX_CONCURRENT,
-	DEFAULT_AGENT_MAX_DEPTH,
-} from "../src/tools/AgentToolConstants.ts";
 
 function baseCtx(): ToolContext {
 	return {

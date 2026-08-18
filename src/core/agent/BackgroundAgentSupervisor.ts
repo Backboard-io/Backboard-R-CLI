@@ -5,6 +5,10 @@ import { truncate } from "../../utils/string.ts";
 import type { AgentDefinition } from "../agents/AgentDefinition.ts";
 import type { EventBus } from "../bus/EventBus.ts";
 import type { BackgroundRunSnapshot } from "../bus/events.ts";
+import {
+	formatSpawnTree,
+	type SpawnedAgent,
+} from "../tools/AgentToolOutput.ts";
 import type { SubAgentResult } from "./SubAgentTypes.ts";
 
 export const DEFAULT_BACKGROUND_MAX_CONCURRENT = 4;
@@ -13,23 +17,27 @@ const LABEL_LENGTH = 60;
 export interface BackgroundLaunchParams {
 	definition: AgentDefinition;
 	prompt: string;
-	/** Runs the sub-agent against the supervisor's own signal. */
 	run: (signal: AbortSignal) => Promise<SubAgentResult>;
+}
+
+export interface BackgroundAdoptParams {
+	definition: AgentDefinition;
+	prompt: string;
+	continuation: Promise<SubAgentResult>;
+	/** Stops the run. An adopted run has no signal of the supervisor's own. */
+	cancel: () => void;
 }
 
 interface BackgroundRun {
 	snapshot: BackgroundRunSnapshot;
-	abort: AbortController;
+	stop: () => void;
+	/** Set by cancelAll, so the run does not announce a result nobody asked for. */
+	stopped?: boolean;
 }
 
 /**
- * Owns sub-agents that outlive the turn that spawned them.
- *
- * Each run gets an AbortController deliberately unlinked from the parent turn,
- * so cancelling the foreground does not kill background work; `cancelAll` is
- * the explicit way to stop them. Completion is delivered back through the
- * notifier as a low-priority submission, which is why the supervisor never
- * touches the AgentController directly.
+ * Owns sub-agents that outlive the turn that spawned them. Runs are unlinked
+ * from that turn's cancellation; `cancelAll` is the way to stop them.
  */
 export class BackgroundAgentSupervisor {
 	private readonly runs = new Map<string, BackgroundRun>();
@@ -55,26 +63,70 @@ export class BackgroundAgentSupervisor {
 	}
 
 	launch(params: BackgroundLaunchParams): BackgroundRunSnapshot {
-		const id = shortId("bg");
 		const abort = new AbortController();
-		const snapshot: BackgroundRunSnapshot = {
-			id,
-			agent: params.definition.name,
-			label: truncate(params.prompt.replace(/\s+/gu, " ").trim(), LABEL_LENGTH),
-			status: "running",
-			startedAt: Date.now(),
-			rounds: 0,
-		};
-		this.runs.set(id, { snapshot, abort });
+		const { id, snapshot } = this.register(params, false);
+		this.runs.set(id, { snapshot, stop: () => abort.abort() });
 		this.bus.emit({ type: "agent:background_started", run: snapshot });
 
 		void this.drive(id, params, abort.signal);
 		return snapshot;
 	}
 
+	/** Takes over an in-flight run whose budget expired, without interrupting it. */
+	adopt(params: BackgroundAdoptParams): BackgroundRunSnapshot {
+		const { id, snapshot } = this.register(params, true);
+		// An adopted run started under the turn's signal and has since been
+		// detached from it, so stopping it means calling back into the runner.
+		this.runs.set(id, { snapshot, stop: params.cancel });
+		this.bus.emit({ type: "agent:background_started", run: snapshot });
+
+		void this.driveAdopted(id, params.continuation);
+		return snapshot;
+	}
+
+	private register(
+		params: { definition: AgentDefinition; prompt: string },
+		adopted: boolean,
+	): { id: string; snapshot: BackgroundRunSnapshot } {
+		const id = shortId("bg");
+		return {
+			id,
+			snapshot: {
+				id,
+				agent: params.definition.name,
+				label: truncate(
+					params.prompt.replace(/\s+/gu, " ").trim(),
+					LABEL_LENGTH,
+				),
+				status: "running",
+				startedAt: Date.now(),
+				rounds: 0,
+				...(adopted ? { adopted: true } : {}),
+			},
+		};
+	}
+
+	private async driveAdopted(
+		id: string,
+		continuation: Promise<SubAgentResult>,
+	): Promise<void> {
+		let result: SubAgentResult | undefined;
+		let failure: string | undefined;
+		try {
+			// Hold a permit for the rest of its life so an adopted run still
+			// counts against the background cap, even though it started earlier.
+			result = await this.slots.run(() => continuation);
+		} catch (err) {
+			failure = errorMessage(err);
+		}
+		this.finish(id, result, failure, false);
+	}
+
 	cancelAll(): void {
 		for (const run of this.runs.values()) {
-			if (run.snapshot.status === "running") run.abort.abort();
+			if (run.snapshot.status !== "running") continue;
+			run.stopped = true;
+			run.stop();
 		}
 	}
 
@@ -91,11 +143,21 @@ export class BackgroundAgentSupervisor {
 			failure = errorMessage(err);
 		}
 
+		this.finish(id, result, failure, signal.aborted);
+	}
+
+	private finish(
+		id: string,
+		result: SubAgentResult | undefined,
+		failure: string | undefined,
+		cancelled: boolean,
+	): void {
 		const run = this.runs.get(id);
 		if (!run) return;
+		const wasCancelled = cancelled || run.stopped === true;
 		run.snapshot = {
 			...run.snapshot,
-			status: signal.aborted
+			status: wasCancelled
 				? "cancelled"
 				: (result?.status ?? (failure ? "failed" : "completed")),
 			rounds: result?.toolRounds ?? run.snapshot.rounds,
@@ -108,28 +170,32 @@ export class BackgroundAgentSupervisor {
 
 		// A cancelled run was stopped deliberately; re-entering the loop to
 		// announce it would talk over whatever the user cancelled it for.
-		if (signal.aborted) return;
+		if (wasCancelled) return;
 		this.notifier?.(
-			backgroundReportMessage(run.snapshot, result?.report ?? failure ?? ""),
+			backgroundReportMessage(
+				run.snapshot,
+				result?.report ?? failure ?? "",
+				result?.children ?? [],
+			),
 		);
 	}
 }
 
-/**
- * The message injected back into the parent loop. It carries elapsed time
- * explicitly because the workspace may have moved on while the agent ran —
- * the parent must not assume its own earlier reads are still current.
- */
+/** Carries elapsed time, since the workspace may have moved on while it ran. */
 export function backgroundReportMessage(
 	run: BackgroundRunSnapshot,
 	report: string,
+	children: readonly SpawnedAgent[] = [],
 ): string {
+	const tree = children.length
+		? `\n\nSub-agents it spawned:\n${formatSpawnTree(children)}`
+		: "";
 	const elapsedS = Math.max(
 		1,
 		Math.round(((run.finishedAt ?? Date.now()) - run.startedAt) / 1000),
 	);
 	return `<agent-report agent="${run.agent}" status="${run.status}" rounds="${run.rounds}" elapsed="${elapsedS}s">
-${report.trim()}
+${report.trim()}${tree}
 </agent-report>
 
 The background agent "${run.agent}" you launched has finished; the report above is its output. It ran for ${elapsedS}s, so files you read before launching it may have changed — re-read anything you are about to act on. Continue the work this report was for, or tell the user what it found.`;

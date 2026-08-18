@@ -5,11 +5,13 @@ import { EventBus } from "../bus/EventBus.ts";
 import { emptyRuleSet } from "../permissions/PermissionRules.ts";
 import { ClientEventLog } from "../session/ClientEventLog.ts";
 import { Session } from "../session/Session.ts";
+import type { SpawnedAgent } from "../tools/AgentToolOutput.ts";
 import type { ToolContext } from "../tools/ToolContext.ts";
 import { ToolRegistry } from "../tools/ToolRegistry.ts";
 import { AgentLoopFactory } from "./AgentLoopFactory.ts";
 import { RunBudget } from "./RunBudget.ts";
 import {
+	HANDED_OFF_REPORT,
 	MAX_SUBAGENT_TOOL_ROUNDS,
 	SUBAGENT_TIMEOUT_SUMMARY_MS,
 	TIMED_OUT_WITHOUT_REPORT,
@@ -22,6 +24,7 @@ import type {
 } from "./SubAgentTypes.ts";
 
 export type {
+	DeadlineHandoff,
 	SubAgentResult,
 	SubAgentRunnerDeps,
 	SubAgentRunParams,
@@ -55,6 +58,20 @@ export class SubAgentRunner {
 			});
 		}
 		const detachParentProgress = this.attachParentProgressRelay(params, bus);
+
+		// Every Agent result on this private bus is a sub-agent this run spawned.
+		const spawned: SpawnedAgent[] = [];
+		bus.on("tool:result", (event) => {
+			const output = event.agentOutput;
+			if (!output) return;
+			spawned.push({
+				agent: output.agent ?? "agent",
+				status: output.status,
+				rounds: output.rounds,
+				...(output.runId ? { runId: output.runId } : {}),
+				...(output.children?.length ? { children: output.children } : {}),
+			});
+		});
 
 		const reports: string[] = [];
 		bus.on("assistant:message", (event) => {
@@ -98,9 +115,14 @@ export class SubAgentRunner {
 			? parentRecorder?.scopedToTurn(params.parentTurnId)
 			: undefined;
 
+		// A budget bounds how long someone waits. With a handoff, or once the
+		// chain is already backgrounded, nobody is: expiry must not abort.
+		const canHandOff = params.onDeadline !== undefined;
+		const noWaiter = params.parentInBackground === true;
 		const budget = RunBudget.start(
 			params.parentSignal,
 			params.definition.timeoutMs,
+			{ abortOnExpiry: !canHandOff && !noWaiter },
 		);
 
 		const ctx: ToolContext = {
@@ -114,6 +136,7 @@ export class SubAgentRunner {
 			},
 			getTodos: () => session.todos,
 			agentDepth: params.depth,
+			inBackgroundChain: params.chainInBackground === true,
 			trace: params.trace?.context,
 			lsp: this.deps.lsp,
 			checkpoints,
@@ -140,49 +163,83 @@ export class SubAgentRunner {
 			maxToolRounds: params.definition.maxRounds ?? MAX_SUBAGENT_TOOL_ROUNDS,
 		});
 
-		try {
-			const status = await loop.run(params.prompt.trim(), ctx);
+		let handedOff = false;
+		const settle = (async (): Promise<SubAgentResult> => {
+			try {
+				const status = await loop.run(params.prompt.trim(), ctx);
 
-			// A timeout surfaces as a cancelled turn. Rather than discard the work,
-			// spend one short bounded turn asking for what it established so far.
-			if (status === "cancelled" && budget.timedOut) {
-				await this.summarizeAfterTimeout({
-					loopFactory,
-					session,
-					bus,
-					ctx,
-					params,
-					model,
-					thinking,
-					thinkingResolver,
-				});
+				// The deadline aborted the turn; salvage what it established.
+				if (status === "cancelled" && budget.timedOut && !handedOff) {
+					await this.summarizeAfterTimeout({
+						loopFactory,
+						session,
+						bus,
+						ctx,
+						params,
+						model,
+						thinking,
+						thinkingResolver,
+					});
+					return {
+						report: reports.at(-1) ?? TIMED_OUT_WITHOUT_REPORT,
+						status: "timed_out",
+						usage: session.usage,
+						toolRounds: loop.toolRounds,
+						...(spawned.length ? { children: [...spawned] } : {}),
+					};
+				}
+
 				return {
-					report: reports.at(-1) ?? TIMED_OUT_WITHOUT_REPORT,
-					status: "timed_out",
+					report: reports.at(-1) ?? "(the sub-agent produced no output)",
+					status,
 					usage: session.usage,
 					toolRounds: loop.toolRounds,
+					...(spawned.length ? { children: [...spawned] } : {}),
 				};
+			} finally {
+				budget.dispose();
+				detachParentProgress();
+				detachSessionProjection();
+				await childLog?.flush();
 			}
+		})();
 
-			return {
-				report: reports.at(-1) ?? "(the sub-agent produced no output)",
-				status,
-				usage: session.usage,
-				toolRounds: loop.toolRounds,
-			};
-		} finally {
-			budget.dispose();
-			detachParentProgress();
-			detachSessionProjection();
-			await childLog?.flush();
+		if (!canHandOff) return settle;
+
+		// Whichever comes first: the run finishing, or its budget running out.
+		const outcome = await Promise.race([
+			settle.then((result) => ({ kind: "settled" as const, result })),
+			budget.expiry.then(() => ({ kind: "expired" as const })),
+		]);
+		if (outcome.kind === "settled") return outcome.result;
+
+		const handle = params.onDeadline?.({
+			continuation: settle,
+			cancel: () => budget.cancel(),
+		});
+		if (!handle) {
+			// Nowhere to hand it off to, so enforce the budget after all.
+			budget.abortForTimeout();
+			return settle;
 		}
+
+		// The turn no longer owns this run, so its cancellation must not reach
+		// it, and its progress must stop touching a tool row that is now closed.
+		handedOff = true;
+		budget.detachFromParent();
+		detachParentProgress();
+		return {
+			report: HANDED_OFF_REPORT,
+			status: "backgrounded",
+			usage: session.usage,
+			toolRounds: loop.toolRounds,
+			runId: handle.runId,
+			...(params.trace ? { logPath: params.trace.clientLogPath } : {}),
+			...(spawned.length ? { children: [...spawned] } : {}),
+		};
 	}
 
-	/**
-	 * Runs one tool-less turn on the timed-out sub-agent's own session, so the
-	 * report reflects its actual findings. Best-effort: a failure here leaves the
-	 * last streamed message as the report rather than losing the run.
-	 */
+	/** One tool-less turn on the run's own session. Best-effort. */
 	private async summarizeAfterTimeout(input: {
 		loopFactory: AgentLoopFactory;
 		session: Session;

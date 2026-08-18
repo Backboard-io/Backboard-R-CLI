@@ -2,10 +2,17 @@ import { z } from "zod";
 import type { AgentTraceStore } from "../core/agent/AgentTraceStore.ts";
 import type { BackgroundAgentSupervisor } from "../core/agent/BackgroundAgentSupervisor.ts";
 import type { JSONValue } from "../core/agent/rlm/RLMTypes.ts";
-import type { SubAgentResult } from "../core/agent/SubAgentRunner.ts";
+import type {
+	DeadlineHandoff,
+	SubAgentResult,
+} from "../core/agent/SubAgentRunner.ts";
 import type { AgentDefinition } from "../core/agents/AgentDefinition.ts";
 import { WORKER_AGENT_NAME } from "../core/agents/builtin.ts";
 import type { PermissionDecision } from "../core/permissions/types.ts";
+import {
+	formatSpawnTree,
+	type SpawnedAgent,
+} from "../core/tools/AgentToolOutput.ts";
 import type { OpenAITool } from "../core/tools/schema.ts";
 import { Tool } from "../core/tools/Tool.ts";
 import type { ToolContext } from "../core/tools/ToolContext.ts";
@@ -113,9 +120,7 @@ export class AgentTool extends Tool<AgentToolInput, AgentToolOutput> {
 
 	constructor(private readonly deps: AgentToolDeps) {
 		super();
-		// A spawn chain holds one permit per level while each ancestor awaits its
-		// descendant, so fewer permits than levels lets a chain deadlock against
-		// itself. Fail at construction rather than at an unlucky nesting depth.
+		// A chain holds one permit per level, so fewer permits than levels deadlocks.
 		if (deps.maxConcurrent < deps.maxDepth) {
 			throw new Error(
 				`AgentTool requires maxConcurrent (${deps.maxConcurrent}) >= maxDepth (${deps.maxDepth}) to avoid deadlocking nested spawns.`,
@@ -199,9 +204,7 @@ export class AgentTool extends Tool<AgentToolInput, AgentToolOutput> {
 
 		const run: AgentRun = { input, ctx, definition, depth, trace, tracePath };
 		try {
-			// Background dispatch is top-level only. A nested background spawn
-			// would outlive the sub-agent that owns it, leaving no one to receive
-			// its report, so deeper spawns run inline regardless of the flag.
+			// Top-level only: a nested background spawn would outlive its owner.
 			if (
 				definition.background &&
 				this.deps.supervisor &&
@@ -232,6 +235,7 @@ export class AgentTool extends Tool<AgentToolInput, AgentToolOutput> {
 		return ok(
 			{
 				mode: "worker",
+				agent: run.definition.name,
 				report,
 				status: "launched",
 				rounds: 0,
@@ -262,6 +266,7 @@ export class AgentTool extends Tool<AgentToolInput, AgentToolOutput> {
 		return ok(
 			{
 				mode: "rlm",
+				agent: definition.name,
 				report: result.report,
 				status: result.status,
 				rounds: result.rounds,
@@ -272,15 +277,12 @@ export class AgentTool extends Tool<AgentToolInput, AgentToolOutput> {
 		);
 	}
 
-	/**
-	 * Runs the sub-agent under an explicit signal. Foreground calls pass the
-	 * turn's signal; background calls pass the supervisor's, which is unlinked
-	 * from the turn so cancelling the foreground leaves them running.
-	 */
+	/** Foreground calls pass the turn's signal; background calls the supervisor's. */
 	private runWorkerAgainst(
-		{ input, ctx, definition, depth, trace }: AgentRun,
+		run: AgentRun,
 		signal: AbortSignal,
 	): Promise<SubAgentResult> {
+		const { input, ctx, definition, depth, trace } = run;
 		const traceContext = ctx.trace;
 		const workerTrace =
 			trace && traceContext
@@ -290,10 +292,10 @@ export class AgentTool extends Tool<AgentToolInput, AgentToolOutput> {
 						clientLogPath: trace.paths.clientLog,
 					}
 				: undefined;
-		// A background run outlives the spawning turn, so its tool row is already
-		// closed and its turn's checkpoint already finalized: relaying progress or
-		// journaling edits there would mutate committed state. Both are dropped.
+		// A background run's tool row and checkpoint are already committed.
 		const foreground = signal === ctx.signal;
+		const parentInBackground = ctx.inBackgroundChain === true;
+		const onDeadline = this.deadlineHandoff(run, foreground);
 
 		return this.deps.runner.run({
 			prompt: input.prompt,
@@ -311,6 +313,29 @@ export class AgentTool extends Tool<AgentToolInput, AgentToolOutput> {
 				: {}),
 			parentPermissions: ctx.permissions,
 			trace: workerTrace,
+			parentInBackground,
+			// A run launched into the background, or already inside one, is the
+			// background chain from its children's point of view.
+			chainInBackground: !foreground || parentInBackground,
+			...(onDeadline ? { onDeadline } : {}),
+		});
+	}
+
+	/** Hands a slow run to the background instead of discarding its work. */
+	private deadlineHandoff(
+		run: AgentRun,
+		foreground: boolean,
+	): ((handoff: DeadlineHandoff) => { runId: string } | undefined) | undefined {
+		const supervisor = this.deps.supervisor;
+		// Only the top may hand off: a descendant would report past its owner.
+		if (!supervisor || !foreground || run.depth !== 1) return undefined;
+		return ({ continuation, cancel }) => ({
+			runId: supervisor.adopt({
+				definition: run.definition,
+				prompt: run.input.prompt,
+				continuation,
+				cancel,
+			}).id,
 		});
 	}
 
@@ -323,13 +348,19 @@ export class AgentTool extends Tool<AgentToolInput, AgentToolOutput> {
 		return ok(
 			{
 				mode: "worker",
+				agent: run.definition.name,
 				report: result.report,
 				status: result.status,
 				rounds: result.toolRounds,
 				...(tracePath ? { tracePath } : {}),
+				...(result.runId ? { runId: result.runId } : {}),
+				...(result.logPath ? { logPath: result.logPath } : {}),
+				...(result.children?.length ? { children: result.children } : {}),
 			},
 			workerReportForLLM(result),
-			agentTitle(result.status, result.toolRounds),
+			result.status === "backgrounded"
+				? `Still running in background (${result.runId})`
+				: agentTitle(result.status, result.toolRounds),
 		);
 	}
 }
@@ -341,8 +372,30 @@ function agentTitle(status: string, rounds: number): string {
 	return `Failed after ${suffix}`;
 }
 
+function withSpawnTree(text: string, result: SubAgentResult): string {
+	if (!result.children?.length) return text;
+	return `${text}
+
+Sub-agents it spawned:
+${formatSpawnTree(result.children)}`;
+}
+
 function workerReportForLLM(result: SubAgentResult): string {
+	return withSpawnTree(workerReportBody(result), result);
+}
+
+function workerReportBody(result: SubAgentResult): string {
 	if (result.status === "completed") return result.report;
+	// A handed-off run is still doing the work. Say so explicitly, or the model
+	// reads a non-completed status as failure and starts the task over.
+	if (result.status === "backgrounded") {
+		const log = result.logPath
+			? `\nIts transcript so far is at ${result.logPath} — read that to see where it is.`
+			: "";
+		return `The sub-agent exceeded its time budget but is STILL RUNNING in the background (id: ${result.runId}). It has not failed and its work is not lost.${log}
+
+Do not start this task again. You will be given its report when it finishes. Continue with other work in the meantime, or tell the user it is still going.`;
+	}
 	// A timed-out worker still summarized what it found, so hand the parent the
 	// partial report rather than an error string it can only give up on.
 	if (result.status === "timed_out") {

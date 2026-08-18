@@ -3,6 +3,9 @@ export const MAX_SUBAGENT_TOOL_ROUNDS = 20;
 /** Ceiling on the post-timeout summary turn, so expiry stays bounded. */
 export const SUBAGENT_TIMEOUT_SUMMARY_MS = 15_000;
 
+export const HANDED_OFF_REPORT =
+	"Budget expired while the sub-agent was still working, so it moved to the background rather than losing its progress.";
+
 export const TIMED_OUT_WITHOUT_REPORT =
 	"(the sub-agent ran out of time before producing a report)";
 

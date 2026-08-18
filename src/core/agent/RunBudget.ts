@@ -5,22 +5,37 @@ export class RunTimeoutError extends Error {
 	}
 }
 
+export interface RunBudgetOptions {
+	/** False keeps the run alive past the deadline; await `expiry` instead. */
+	abortOnExpiry?: boolean;
+}
+
 /**
- * A wall-clock budget layered over a parent AbortSignal. Expiry is
- * distinguishable from a parent cancel so callers can degrade gracefully —
- * summarizing partial progress — instead of discarding the run's work.
+ * A wall-clock budget over a parent AbortSignal. Expiry is distinguishable from
+ * a parent cancel, so callers can degrade instead of discarding the run's work.
  */
 export class RunBudget {
 	private readonly controller = new AbortController();
 	private readonly timeout: ReturnType<typeof setTimeout> | null = null;
 	private readonly abortFromParent: () => void;
 	private readonly deadlineMs: number;
+	private readonly abortOnExpiry: boolean;
+	private signalExpiry!: () => void;
 	private expired = false;
+	private detached = false;
+
+	/** Resolves once the deadline passes. Never rejects; never resolves without one. */
+	readonly expiry: Promise<void>;
 
 	private constructor(
 		private readonly parentSignal: AbortSignal,
 		readonly timeoutMs?: number,
+		options: RunBudgetOptions = {},
 	) {
+		this.abortOnExpiry = options.abortOnExpiry ?? true;
+		this.expiry = new Promise<void>((resolve) => {
+			this.signalExpiry = resolve;
+		});
 		this.deadlineMs =
 			timeoutMs === undefined
 				? Number.POSITIVE_INFINITY
@@ -39,13 +54,20 @@ export class RunBudget {
 		if (timeoutMs !== undefined) {
 			this.timeout = setTimeout(() => {
 				this.expired = true;
-				this.controller.abort(new RunTimeoutError(timeoutMs));
+				if (this.abortOnExpiry) {
+					this.controller.abort(new RunTimeoutError(timeoutMs));
+				}
+				this.signalExpiry();
 			}, timeoutMs);
 		}
 	}
 
-	static start(parentSignal: AbortSignal, timeoutMs?: number): RunBudget {
-		return new RunBudget(parentSignal, timeoutMs);
+	static start(
+		parentSignal: AbortSignal,
+		timeoutMs?: number,
+		options: RunBudgetOptions = {},
+	): RunBudget {
+		return new RunBudget(parentSignal, timeoutMs, options);
 	}
 
 	get signal(): AbortSignal {
@@ -55,6 +77,24 @@ export class RunBudget {
 	/** True only for budget expiry; a parent cancel reports false. */
 	get timedOut(): boolean {
 		return this.expired && !this.parentSignal.aborted;
+	}
+
+	cancel(reason?: unknown): void {
+		this.controller.abort(reason);
+	}
+
+	/** Enforces the deadline late, for a caller that declined the handoff. */
+	abortForTimeout(): void {
+		this.expired = true;
+		this.controller.abort(new RunTimeoutError(this.timeoutMs ?? 0));
+		this.signalExpiry();
+	}
+
+	/** Stops forwarding the parent's cancel, for a run that outlives its turn. */
+	detachFromParent(): void {
+		if (this.detached) return;
+		this.detached = true;
+		this.parentSignal.removeEventListener("abort", this.abortFromParent);
 	}
 
 	get remainingMs(): number | undefined {
@@ -81,6 +121,6 @@ export class RunBudget {
 
 	dispose(): void {
 		if (this.timeout) clearTimeout(this.timeout);
-		this.parentSignal.removeEventListener("abort", this.abortFromParent);
+		this.detachFromParent();
 	}
 }

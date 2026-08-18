@@ -431,7 +431,10 @@ async function main(): Promise<void> {
 			/>
 		</ThemeProvider>
 	);
-	const instance = render(app, interactiveRenderOptions(false));
+	const instance = render(
+		app,
+		interactiveRenderOptions({ exitOnCtrlC: false }),
+	);
 
 	try {
 		await instance.waitUntilExit();
@@ -460,7 +463,7 @@ async function runAuthScreen(): Promise<boolean> {
 			/>
 		</ThemeProvider>
 	);
-	const instance = render(app, interactiveRenderOptions(true));
+	const instance = render(app, interactiveRenderOptions({ exitOnCtrlC: true }));
 	await instance.waitUntilExit();
 	if (didLogin) {
 		instance.clear();

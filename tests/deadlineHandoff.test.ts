@@ -4,6 +4,7 @@ import { RunBudget } from "../src/core/agent/RunBudget.ts";
 import { SubAgentRunner } from "../src/core/agent/SubAgentRunner.ts";
 import type { AgentDefinition } from "../src/core/agents/AgentDefinition.ts";
 import { EventBus } from "../src/core/bus/EventBus.ts";
+import type { CheckpointRecorder } from "../src/core/checkpoints/CheckpointStore.ts";
 import { BackboardClient } from "../src/providers/backboard/BackboardClient.ts";
 import type {
 	ProviderEvent,
@@ -264,6 +265,82 @@ describe("budgets inside a backgrounded chain", () => {
 		});
 
 		expect(seen).toBe(true);
+	});
+});
+
+describe("handoff detaches from the turn's checkpoint", () => {
+	it("stops journaling once the turn that owned it has ended", async () => {
+		const probe = new TestTool({ name: "Read", readOnly: true });
+		const run = probe.execute.bind(probe);
+		let journaled = 0;
+		let captured: { checkpoints?: CheckpointRecorder } | undefined;
+		probe.execute = (input, toolCtx) => {
+			captured = toolCtx;
+			return run(input, toolCtx);
+		};
+
+		class ToolThenStall extends SlowClient {
+			constructor() {
+				super(1);
+			}
+			override async *runMessage(): AsyncIterable<ProviderEvent> {
+				yield { kind: "thread", threadId: "t" };
+				yield {
+					kind: "requires_action",
+					runId: "r",
+					calls: [{ id: "c1", name: "Read", input: {} }],
+				};
+			}
+			override async *runToolOutputs(): AsyncIterable<ProviderEvent> {
+				await sleep(400);
+				yield { kind: "assistant_delta", text: "done" };
+				yield { kind: "completed" };
+			}
+		}
+
+		const runner = new SubAgentRunner({
+			client: new ToolThenStall(),
+			getModel: () => TEST_MODEL,
+			memory: "off",
+			memoryProfile: "code",
+			getThinking: async () => undefined,
+			toolFactory: () => [probe],
+			checkpoints: {
+				scopedToTurn: () => ({
+					recordPreImage: async () => {
+						journaled++;
+					},
+					recordPostImage: async () => {
+						journaled++;
+					},
+					revertToolCall: async () => {},
+					beginShellCapture: async () => {},
+					endShellCapture: async () => {},
+					captureWarning: () => null,
+					scopedToTurn: () => {
+						throw new Error("unused");
+					},
+				}),
+			} as never,
+		});
+
+		const result = await runner.run({
+			prompt: "long task",
+			definition: definition({ timeoutMs: 60 }),
+			depth: 1,
+			parentCwd: process.cwd(),
+			parentSignal: new AbortController().signal,
+			parentTurnId: "turn_1",
+			onDeadline: () => ({ runId: "bg_test" }),
+		});
+
+		expect(result.status).toBe("backgrounded");
+		expect(captured?.checkpoints).toBeDefined();
+
+		// After handoff the turn's checkpoint is finalized, so an edit the run
+		// makes from here must not be journaled into it.
+		await captured?.checkpoints?.recordPreImage("/tmp/x", {} as never);
+		expect(journaled).toBe(0);
 	});
 });
 

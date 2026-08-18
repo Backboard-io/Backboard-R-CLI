@@ -425,7 +425,9 @@ Details worth knowing:
   the turn that spawned it, so its file edits are deliberately not journaled
   there rather than being written into an already-finalized checkpoint. Prefer
   read-only tools for background agents that you do not want to review by hand.
-- **At most four run at once**; further background spawns queue.
+- **At most four *launched* background agents run at once**; further ones queue.
+  A run that reaches the background by exceeding its budget was already going, so
+  it is not throttled — the cap bounds what is started, not what is adopted.
 - **`--print` and `--format json` ignore the flag.** A headless run exits after
   one prompt, so background agents there would be cancelled before reporting;
   they run inline instead and the answer includes their work.

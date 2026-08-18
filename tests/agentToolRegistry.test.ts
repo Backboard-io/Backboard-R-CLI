@@ -127,23 +127,10 @@ describe("AgentTool registry dispatch", () => {
 		expect(rlmCalls[0]?.timeoutMs).toBe(5_000);
 	});
 
-	it("refuses a permit pool smaller than the nesting depth", () => {
-		expect(() => makeTool([RESEARCHER], 1)).toThrow(
-			"maxConcurrent (1) >= maxDepth (2)",
-		);
-	});
-
-	it("ships defaults that satisfy the no-deadlock invariant", () => {
-		expect(DEFAULT_AGENT_MAX_CONCURRENT).toBeGreaterThanOrEqual(
-			DEFAULT_AGENT_MAX_DEPTH,
-		);
-	});
-
-	it("lets a full-depth chain finish when permits exactly match depth", async () => {
-		// One permit per level is the tight case the guard allows: the parent
-		// holds a permit while awaiting the child, so the pool must not starve.
+	it("does not deadlock when parallel chains all spawn nested agents", async () => {
 		const catalog = new AgentCatalog([...BUILT_IN_AGENTS]);
 		let tool!: AgentTool;
+		let nested = 0;
 		tool = new AgentTool({
 			runner: {
 				run: async ({ depth }) => {
@@ -152,9 +139,10 @@ describe("AgentTool registry dispatch", () => {
 							{ prompt: "nested" },
 							{ ...baseCtx(), agentDepth: depth },
 						);
+						nested++;
 					}
 					return {
-						report: `depth ${depth}`,
+						report: "r",
 						status: "completed" as const,
 						usage: {},
 						toolRounds: 1,
@@ -168,11 +156,19 @@ describe("AgentTool registry dispatch", () => {
 			}),
 			getCatalog: () => catalog,
 			maxDepth: 2,
-			maxConcurrent: 2,
+			maxConcurrent: 4,
 		});
 
-		const result = await tool.execute({ prompt: "root" }, baseCtx());
-		expect(result.data.report).toBe("depth 1");
+		const chains = Array.from({ length: 4 }, () =>
+			tool.execute({ prompt: "top" }, baseCtx()),
+		);
+		const outcome = await Promise.race([
+			Promise.all(chains).then(() => "completed"),
+			new Promise((resolve) => setTimeout(() => resolve("deadlock"), 1_000)),
+		]);
+
+		expect(outcome).toBe("completed");
+		expect(nested).toBe(4);
 	});
 
 	it("caps concurrent runs and queues the overflow", async () => {

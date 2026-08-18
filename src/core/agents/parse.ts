@@ -53,7 +53,7 @@ export function parseAgentFromMarkdown(
 	const description = stringValue(data.description);
 	if (!description) return skip("missing description.");
 	if (description.length > MAX_DESCRIPTION_LENGTH) {
-		return skip("description exceeds 1024 characters.");
+		return skip(`description exceeds ${MAX_DESCRIPTION_LENGTH} characters.`);
 	}
 
 	const mode = parseMode(data.mode);
@@ -83,6 +83,9 @@ export function parseAgentFromMarkdown(
 
 	const background = boolValue(data.background);
 	if (background === INVALID) return skip("background must be a boolean.");
+	if (background && mode === "rlm") {
+		return skip("background is not supported for rlm agents.");
+	}
 
 	return {
 		agent: {

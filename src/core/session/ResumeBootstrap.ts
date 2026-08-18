@@ -24,38 +24,35 @@ export async function resolveLocalResumeBootstrap(
 	const normalized = id?.trim();
 	if (!normalized || !isLocalResumeId(normalized)) return null;
 	const conversationStore = new ByokConversationStore(cwd);
-	const likelySessionId = isSessionId(normalized) ? normalized : sessionIdHint;
+	const likelySessionId = isSessionId(normalized)
+		? normalized
+		: sessionIdHint && isSessionId(sessionIdHint)
+			? sessionIdHint
+			: undefined;
 	const directConversation = likelySessionId
 		? await conversationStore.getAtSessionRoot(
 				qSessionDir(cwd, likelySessionId),
 				isByokThreadId(normalized) ? normalized : undefined,
 			)
 		: null;
-	const conversation =
-		directConversation ??
-		(await conversationStore.list()).find(
-			(candidate) =>
-				candidate.threadId === normalized || candidate.sessionId === normalized,
-		);
-	if (conversation) {
+	if (directConversation) return conversationBootstrap(directConversation);
+	if (isSessionId(normalized)) {
+		const meta = await readSessionMeta(cwd, normalized);
+		if (!meta) return null;
 		return {
-			kind: "byok",
-			threadId: conversation.threadId,
-			sessionId: conversation.sessionId,
-			model: {
-				provider: conversation.provider,
-				model: conversation.model,
-			},
+			kind: "session",
+			sessionId: normalized,
+			...(meta.model ? { model: meta.model } : {}),
 		};
 	}
-	if (!isSessionId(normalized)) return null;
-	const meta = await readSessionMeta(cwd, normalized);
-	if (!meta) return null;
-	return {
-		kind: "session",
-		sessionId: normalized,
-		...(meta.model ? { model: meta.model } : {}),
-	};
+	const conversation = (await conversationStore.list()).find(
+		(candidate) =>
+			candidate.threadId === normalized || candidate.sessionId === normalized,
+	);
+	if (conversation) {
+		return conversationBootstrap(conversation);
+	}
+	return null;
 }
 
 export function isLocalResumeId(id: string): boolean {
@@ -97,4 +94,21 @@ async function readSessionMeta(
 	} catch {
 		return null;
 	}
+}
+
+function conversationBootstrap(conversation: {
+	threadId: string;
+	sessionId: string;
+	provider: ModelRef["provider"];
+	model: string;
+}): LocalResumeBootstrap {
+	return {
+		kind: "byok",
+		threadId: conversation.threadId,
+		sessionId: conversation.sessionId,
+		model: {
+			provider: conversation.provider,
+			model: conversation.model,
+		},
+	};
 }

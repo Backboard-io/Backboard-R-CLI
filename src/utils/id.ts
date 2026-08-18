@@ -13,8 +13,8 @@ export function isShortId(value: string, prefix: string): boolean {
 	const expectedPrefix = `${prefix}_`;
 	return (
 		value.length === expectedPrefix.length + 8 &&
-		value.toLowerCase().startsWith(expectedPrefix.toLowerCase()) &&
-		/^[a-z0-9]{8}$/i.test(value.slice(expectedPrefix.length))
+		value.startsWith(expectedPrefix) &&
+		/^[0-9a-f]{8}$/.test(value.slice(expectedPrefix.length))
 	);
 }
 

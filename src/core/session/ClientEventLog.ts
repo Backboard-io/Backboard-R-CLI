@@ -26,9 +26,13 @@ export class ClientEventLog {
 
 	constructor(
 		private sessionId: string,
-		filePath: string,
+		private filePath: string,
 	) {
 		this.writer = new JsonlWriter(filePath);
+	}
+
+	async initialize(): Promise<void> {
+		this.sequence = await nextJsonlSequence(this.filePath);
 	}
 
 	async activate(sessionId: string, filePath: string): Promise<void> {
@@ -42,6 +46,7 @@ export class ClientEventLog {
 			const sequence = await nextJsonlSequence(filePath);
 			await this.writer.flush();
 			this.sessionId = sessionId;
+			this.filePath = filePath;
 			this.sequence = sequence;
 			this.writer = new JsonlWriter(filePath);
 			this.pendingDuringActivation = null;

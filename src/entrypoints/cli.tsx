@@ -7,9 +7,15 @@ import {
 	APP_DISPLAY_NAME,
 	APP_VERSION,
 } from "../config/branding.ts";
+import { CliUserError, cliUserErrorMessage } from "../config/CliUserError.ts";
 import { Config } from "../config/Config.ts";
+import { parseOutputFormat } from "../config/defaults.ts";
 import { parseFlags } from "../config/flags.ts";
 import { buildResumeCommand } from "../config/resumeCommand.ts";
+import {
+	isHeadlessInvocation,
+	parseRequestedResume,
+} from "../config/resumePreflight.ts";
 import { AgentController } from "../core/agent/AgentController.ts";
 import { AttachmentManager } from "../core/attachments/AttachmentManager.ts";
 import { sweepStaleClipboardImages } from "../core/attachments/clipboardImage.ts";
@@ -84,7 +90,7 @@ import {
 	resolveResumeTarget,
 } from "../ui/utils/resumeSession.ts";
 import { errorMessage } from "../utils/errors.ts";
-import { shortId } from "../utils/id.ts";
+import { isByokThreadId, shortId } from "../utils/id.ts";
 import { pluralize } from "../utils/string.ts";
 
 const HELP = `${APP_DISPLAY_NAME} · coding agent
@@ -135,7 +141,13 @@ async function main(): Promise<void> {
 	}
 	const interactiveRenderConfig = resolveInteractiveRenderConfig();
 
-	const requestedResume = earlyFlags.resume?.trim();
+	let earlyFormat: ReturnType<typeof parseOutputFormat>;
+	try {
+		earlyFormat = parseOutputFormat(earlyFlags.format ?? "default");
+	} catch (error) {
+		throw new CliUserError(errorMessage(error));
+	}
+	const requestedResume = parseRequestedResume(earlyFlags.resume);
 	const indexedResume = requestedResume
 		? await lookupResumeEntry(requestedResume)
 		: null;
@@ -152,19 +164,19 @@ async function main(): Promise<void> {
 		indexedResume?.sessionId,
 	);
 	if (requestedResume && isLocalResumeId(requestedResume) && !localResume) {
-		throw new Error(
+		throw new CliUserError(
 			`Local session "${requestedResume}" was not found in ${resumeCwd}. Run the command from its original workspace or pass --cwd <workspace>.`,
 		);
 	}
-	if (isRemoteResumeId(requestedResume) && resolveAuth().backboard === null) {
-		if (
-			earlyFlags.print !== undefined ||
-			earlyFlags.format === "json" ||
-			!process.stdin.isTTY ||
-			!process.stdout.isTTY
-		) {
-			throw new Error(
-				`Backboard sign-in is required to resume remote session "${requestedResume}".`,
+	const remoteResumeId = isRemoteResumeId(requestedResume)
+		? requestedResume
+		: indexedResume?.threadId && !isByokThreadId(indexedResume.threadId)
+			? indexedResume.threadId
+			: undefined;
+	if (remoteResumeId && resolveAuth().backboard === null) {
+		if (isHeadlessInvocation(earlyFlags, earlyFormat)) {
+			throw new CliUserError(
+				`Backboard sign-in is required to resume remote session "${remoteResumeId}".`,
 			);
 		}
 		const didLogin = await runLoginCommand();
@@ -184,7 +196,7 @@ async function main(): Promise<void> {
 			break;
 		} catch (err) {
 			const error = err instanceof Error ? err : String(err);
-			if (shouldShowAuthScreen(error, earlyFlags)) {
+			if (shouldShowAuthScreen(error, earlyFlags, earlyFormat)) {
 				const didLogin = await runAuthScreen(interactiveRenderConfig);
 				if (!didLogin) return;
 				continue;
@@ -229,6 +241,9 @@ async function main(): Promise<void> {
 	const bus = new EventBus();
 	const clientLog = new ClientEventLog(sessionId, store.paths.clientLog);
 	const serverLog = new ServerEventLog(sessionId, store.paths.serverLog);
+	if (localResume) {
+		await Promise.all([clientLog.initialize(), serverLog.initialize()]);
+	}
 	clientLog.attach(bus);
 	// A crash mid-/undo leaves its write-ahead marker in the crashed session's
 	// journal, and every launch mints a fresh session dir — so follow the
@@ -286,7 +301,7 @@ async function main(): Promise<void> {
 	// Both --print and --format json run through runHeadless, which has no UI to
 	// answer an input:request. Anything that asks there would hang forever, so
 	// the gate must know there is nobody to prompt.
-	const headless = config.flags.print !== undefined || config.format === "json";
+	const headless = isHeadlessInvocation(config.flags, config.format);
 	const permissions = buildPermissionContext(
 		config.cwd,
 		config.flags.permissionMode,
@@ -468,12 +483,12 @@ async function main(): Promise<void> {
 				client,
 				config.cwd,
 				config.flags.resume,
+				indexedResume,
 			);
 			await activateResumeTarget(initialResumeTarget, {
 				config,
 				controller,
 				onResumeLocalSession: (id) => sessionLifecycle.resume(id),
-				onWarning: (message) => bus.emit({ type: "system:warning", message }),
 			});
 			const active = sessionLifecycle.current();
 			await registerResumeIds({
@@ -539,6 +554,7 @@ async function main(): Promise<void> {
 				onNewSession={() => sessionLifecycle.startNew()}
 				onResumeLocalSession={(sessionId) => sessionLifecycle.resume(sessionId)}
 				onResumeRemoteSession={() => sessionLifecycle.startNew()}
+				getActiveSessionId={() => sessionLifecycle.current().sessionId}
 				onExit={() => {
 					controller.cancel({ clearQueue: true });
 				}}
@@ -611,9 +627,9 @@ function clearTerminalScreen(): void {
 function shouldShowAuthScreen(
 	err: Error | string,
 	flags: ReturnType<typeof parseFlags>,
+	format: ReturnType<typeof parseOutputFormat>,
 ): boolean {
-	if (flags.print !== undefined || flags.format === "json") return false;
-	if (!process.stdin.isTTY || !process.stdout.isTTY) return false;
+	if (isHeadlessInvocation(flags, format)) return false;
 
 	const message = errorMessage(err);
 	return (
@@ -734,6 +750,8 @@ main().catch((err) => {
 });
 
 function formatFatalError(err: Error | string): string {
+	const userMessage = cliUserErrorMessage(err);
+	if (userMessage !== null) return userMessage;
 	if (err instanceof BackboardError && err.status === 401) {
 		return [
 			"Backboard rejected BACKBOARD_API_KEY (HTTP 401).",

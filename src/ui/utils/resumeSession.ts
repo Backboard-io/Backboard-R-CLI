@@ -1,8 +1,12 @@
 import { stat } from "node:fs/promises";
+import { resolve } from "node:path";
+import { CliUserError } from "../../config/CliUserError.ts";
 import type { Config } from "../../config/Config.ts";
 import { qSessionDir } from "../../config/paths.ts";
+import { parseRequestedResume } from "../../config/resumePreflight.ts";
 import type { AgentController } from "../../core/agent/AgentController.ts";
 import type { Message } from "../../core/session/Message.ts";
+import type { ResumeIndexEntry } from "../../core/session/ResumeIndex.ts";
 import type { AgentClient } from "../../providers/AgentClient.ts";
 import { BackboardError } from "../../providers/backboard/errors.ts";
 import {
@@ -14,7 +18,6 @@ import {
 	BYOK_SESSION_ID_METADATA_KEY,
 	BYOK_THREAD_METADATA_KEY,
 } from "../../providers/byok/ByokClient.ts";
-import { errorMessage } from "../../utils/errors.ts";
 import { isByokThreadId, isSessionId } from "../../utils/id.ts";
 
 export interface ResumeTarget {
@@ -29,16 +32,36 @@ interface ActivateResumeTargetOptions {
 	controller: AgentController;
 	onResumeLocalSession: (sessionId: string) => Promise<void>;
 	onResumeRemoteSession?: () => Promise<void>;
-	onWarning?: (message: string) => void;
 }
 
 export async function resolveResumeTarget(
 	client: AgentClient,
 	cwd: string,
 	id: string,
+	indexedResume: ResumeIndexEntry | null = null,
 ): Promise<ResumeTarget> {
-	const normalized = id.trim();
-	if (!normalized) throw new Error("A session ID is required.");
+	const normalized = parseRequestedResume(id);
+
+	if (isSessionId(normalized)) {
+		if (
+			indexedResume?.threadId &&
+			resolve(indexedResume.cwd) === resolve(cwd)
+		) {
+			try {
+				const target = resumeTargetFromHydratedThread(
+					await client.getThread(indexedResume.threadId),
+				);
+				return { ...target, localSessionId: normalized };
+			} catch (error) {
+				if (!(error instanceof BackboardError) || error.status !== 404) {
+					throw error;
+				}
+				throw new CliUserError(
+					`Backboard session "${indexedResume.threadId}" was not found for local session "${normalized}".`,
+				);
+			}
+		}
+	}
 
 	if (!isByokThreadId(normalized) && !isSessionId(normalized)) {
 		try {
@@ -70,7 +93,7 @@ export async function resolveResumeTarget(
 		};
 	}
 
-	throw new Error(`Session "${normalized}" was not found.`);
+	throw new CliUserError(`Session "${normalized}" was not found.`);
 }
 
 export async function hydrateResumeTarget(
@@ -92,7 +115,9 @@ function resumeTargetFromHydratedThread(
 		byok &&
 		(typeof localSessionId !== "string" || !isSessionId(localSessionId))
 	) {
-		throw new Error("Saved BYOK session is missing its local session id.");
+		throw new CliUserError(
+			"Saved BYOK session is missing its local session id.",
+		);
 	}
 	return {
 		displayTitle: threadDisplayTitle(hydrated),
@@ -124,11 +149,6 @@ export async function activateResumeTarget(
 		if (typeof provider === "string" && typeof model === "string") {
 			options.config.setModel({ provider, model });
 			options.controller.setModelContextLimit(null);
-			await options.config.saveRuntimeSelection().catch((error) => {
-				options.onWarning?.(
-					`Session resumed, but saving its model failed: ${errorMessage(error)}`,
-				);
-			});
 		}
 	}
 
@@ -142,8 +162,10 @@ export async function activateResumeTarget(
 export function isAlreadyActiveResume(
 	id: string,
 	activeThreadId: string | null,
+	activeSessionId?: string,
 ): boolean {
-	return activeThreadId !== null && id.trim() === activeThreadId;
+	const normalized = id.trim();
+	return normalized === activeThreadId || normalized === activeSessionId;
 }
 
 async function isDirectory(path: string): Promise<boolean> {

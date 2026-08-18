@@ -2,7 +2,9 @@ import { describe, expect, it } from "bun:test";
 import { mkdir, mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { Config } from "../src/config/Config.ts";
 import { qSessionDir } from "../src/config/paths.ts";
+import type { AgentController } from "../src/core/agent/AgentController.ts";
 import type { AgentClient } from "../src/providers/AgentClient.ts";
 import { BackboardError } from "../src/providers/backboard/errors.ts";
 import type { BackboardThread } from "../src/providers/backboard/types.ts";
@@ -11,6 +13,7 @@ import {
 	BYOK_THREAD_METADATA_KEY,
 } from "../src/providers/byok/ByokClient.ts";
 import {
+	activateResumeTarget,
 	isAlreadyActiveResume,
 	resolveResumeTarget,
 } from "../src/ui/utils/resumeSession.ts";
@@ -29,7 +32,7 @@ describe("resolveResumeTarget", () => {
 	});
 
 	it("resolves BYOK by either thread or local session ID", async () => {
-		const thread = savedThread("byok_thread", {
+		const thread = savedThread("byok_deadbeef", {
 			[BYOK_THREAD_METADATA_KEY]: true,
 			[BYOK_SESSION_ID_METADATA_KEY]: "sess_1234abcd",
 			model_provider: "anthropic",
@@ -37,13 +40,13 @@ describe("resolveResumeTarget", () => {
 		});
 		const client = fakeClient([thread]);
 		expect(
-			(await resolveResumeTarget(client, "/tmp/project", "byok_thread"))
+			(await resolveResumeTarget(client, "/tmp/project", "byok_deadbeef"))
 				.localSessionId,
 		).toBe("sess_1234abcd");
 		expect(
 			(await resolveResumeTarget(client, "/tmp/project", "sess_1234abcd"))
 				.thread?.thread_id,
-		).toBe("byok_thread");
+		).toBe("byok_deadbeef");
 	});
 
 	it("resolves a local-only session directory", async () => {
@@ -58,10 +61,36 @@ describe("resolveResumeTarget", () => {
 		expect(target.localSessionId).toBe("sess_deadbeef");
 	});
 
+	it("uses the indexed remote thread when resuming its local session ID", async () => {
+		const cwd = await mkdtemp(join(tmpdir(), "resume-session-"));
+		await mkdir(qSessionDir(cwd, "sess_deadbeef"), { recursive: true });
+		const thread = savedThread("thread_remote");
+		const target = await resolveResumeTarget(
+			fakeClient([thread]),
+			cwd,
+			"sess_deadbeef",
+			{
+				cwd,
+				sessionId: "sess_deadbeef",
+				threadId: "thread_remote",
+				updatedAt: "2026-08-18T10:00:00Z",
+			},
+		);
+		expect(target.thread?.thread_id).toBe("thread_remote");
+		expect(target.localSessionId).toBe("sess_deadbeef");
+		expect(target.messages).toHaveLength(1);
+	});
+
 	it("rejects unknown IDs", async () => {
 		await expect(
 			resolveResumeTarget(fakeClient([]), "/tmp/project", "byok_deadbeef"),
 		).rejects.toThrow('Session "byok_deadbeef" was not found.');
+	});
+
+	it("rejects noncanonical local IDs instead of treating them as remote", async () => {
+		await expect(
+			resolveResumeTarget(fakeClient([]), "/tmp/project", "SESS_DEADBEEF"),
+		).rejects.toThrow("Local session IDs must use lowercase");
 	});
 
 	it("fetches a remote thread directly when it falls outside the list window", async () => {
@@ -101,6 +130,49 @@ describe("resolveResumeTarget", () => {
 		expect(isAlreadyActiveResume(" thread_old ", "thread_old")).toBe(true);
 		expect(isAlreadyActiveResume("thread_other", "thread_old")).toBe(false);
 		expect(isAlreadyActiveResume("thread_old", null)).toBe(false);
+		expect(isAlreadyActiveResume("sess_deadbeef", null, "sess_deadbeef")).toBe(
+			true,
+		);
+	});
+
+	it("restores a BYOK model without persisting the global selection", async () => {
+		let saved = 0;
+		const hydratedThreadIds: string[] = [];
+		const thread = savedThread("byok_deadbeef", {
+			[BYOK_THREAD_METADATA_KEY]: true,
+			[BYOK_SESSION_ID_METADATA_KEY]: "sess_1234abcd",
+			model_provider: "anthropic",
+			model_name: "claude-test",
+		});
+		const config = {
+			setModel: () => {},
+			saveRuntimeSelection: async () => {
+				saved++;
+			},
+		} as unknown as Config;
+		const controller = {
+			setModelContextLimit: () => {},
+			hydrateSession: (input: { threadId: string }) => {
+				hydratedThreadIds.push(input.threadId);
+			},
+		} as unknown as AgentController;
+
+		await activateResumeTarget(
+			{
+				displayTitle: "Saved work",
+				thread,
+				messages: [],
+				localSessionId: "sess_1234abcd",
+			},
+			{
+				config,
+				controller,
+				onResumeLocalSession: async () => {},
+			},
+		);
+
+		expect(saved).toBe(0);
+		expect(hydratedThreadIds).toEqual(["byok_deadbeef"]);
 	});
 });
 

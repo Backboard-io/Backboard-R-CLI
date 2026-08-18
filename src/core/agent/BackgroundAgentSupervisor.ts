@@ -113,9 +113,7 @@ export class BackgroundAgentSupervisor {
 		let result: SubAgentResult | undefined;
 		let failure: string | undefined;
 		try {
-			// Hold a permit for the rest of its life so an adopted run still
-			// counts against the background cap, even though it started earlier.
-			result = await this.slots.run(() => continuation);
+			result = await continuation;
 		} catch (err) {
 			failure = errorMessage(err);
 		}
@@ -138,7 +136,7 @@ export class BackgroundAgentSupervisor {
 		let result: SubAgentResult | undefined;
 		let failure: string | undefined;
 		try {
-			result = await this.slots.run(() => params.run(signal));
+			result = await this.slots.run(() => params.run(signal), signal);
 		} catch (err) {
 			failure = errorMessage(err);
 		}

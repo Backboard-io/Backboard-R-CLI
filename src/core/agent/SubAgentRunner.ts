@@ -14,6 +14,7 @@ import {
 	HANDED_OFF_REPORT,
 	MAX_SUBAGENT_TOOL_ROUNDS,
 	SUBAGENT_TIMEOUT_SUMMARY_MS,
+	subAgentSystemPrompt,
 	TIMED_OUT_WITHOUT_REPORT,
 	timeoutSummaryPrompt,
 } from "./SubAgentConstants.ts";
@@ -153,7 +154,7 @@ export class SubAgentRunner {
 			session,
 			bus,
 			tools: toolSchemas,
-			systemPrompt: params.definition.systemPrompt,
+			systemPrompt: subAgentSystemPrompt(params.definition.systemPrompt),
 			model,
 			memory: this.deps.memory,
 			memoryProfile: this.deps.memoryProfile,

@@ -1,5 +1,16 @@
 export const MAX_SUBAGENT_TOOL_ROUNDS = 20;
 
+const REPORT_CONTRACT = `You cannot ask the user anything. Work with the tools you have, then stop.
+Finish with a single concise final message that is your report: the parent receives that message and nothing else. Do not narrate your process.`;
+
+/**
+ * A custom agent's markdown body defines its role; the contract the runner
+ * depends on is appended so it cannot be dropped by overriding the prompt.
+ */
+export function subAgentSystemPrompt(body: string): string {
+	return `${body.trim()}\n\n${REPORT_CONTRACT}`;
+}
+
 /** Ceiling on the post-timeout summary turn, so expiry stays bounded. */
 export const SUBAGENT_TIMEOUT_SUMMARY_MS = 15_000;
 

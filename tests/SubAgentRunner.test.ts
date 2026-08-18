@@ -132,8 +132,12 @@ describe("SubAgentRunner", () => {
 		expect(client.messageRequests[0]?.content).toBe(
 			"summarize the module\n\nReturn one sentence.",
 		);
-		expect(client.messageRequests[0]?.system_prompt).toBe(
+		expect(client.messageRequests[0]?.system_prompt).toStartWith(
 			"you are a sub-agent",
+		);
+		// The report contract is appended so an agent file cannot drop it.
+		expect(client.messageRequests[0]?.system_prompt).toContain(
+			"the parent receives that message and nothing else",
 		);
 	});
 

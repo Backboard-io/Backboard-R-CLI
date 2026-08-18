@@ -12,6 +12,7 @@ export interface CliFlags {
 	finalVerification?: boolean;
 	lsp?: boolean;
 	fresh?: boolean;
+	resume?: string;
 	login: boolean;
 	logout: boolean;
 	help: boolean;
@@ -127,6 +128,9 @@ export function parseFlags(argv: string[]): CliFlags {
 					value === undefined ? true : parseBooleanFlag(value, "fresh");
 				break;
 			}
+			case "resume":
+				flags.resume = readValue() ?? "";
+				break;
 			case "no-fresh":
 				flags.fresh = false;
 				break;

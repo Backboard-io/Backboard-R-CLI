@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
+import { resolve as resolvePath } from "node:path";
 import { render } from "ink";
-import { NO_CREDENTIALS_MESSAGE } from "../config/auth.ts";
+import { NO_CREDENTIALS_MESSAGE, resolveAuth } from "../config/auth.ts";
 import {
 	APP_COMMAND_NAME,
 	APP_DISPLAY_NAME,
@@ -8,6 +9,7 @@ import {
 } from "../config/branding.ts";
 import { Config } from "../config/Config.ts";
 import { parseFlags } from "../config/flags.ts";
+import { buildResumeCommand } from "../config/resumeCommand.ts";
 import { AgentController } from "../core/agent/AgentController.ts";
 import { AttachmentManager } from "../core/attachments/AttachmentManager.ts";
 import { sweepStaleClipboardImages } from "../core/attachments/clipboardImage.ts";
@@ -42,9 +44,19 @@ import {
 } from "../core/permissions/index.ts";
 import { ClientEventLog } from "../core/session/ClientEventLog.ts";
 import { JsonEventStream } from "../core/session/JsonEventStream.ts";
+import {
+	isLocalResumeId,
+	isRemoteResumeId,
+	resolveLocalResumeBootstrap,
+} from "../core/session/ResumeBootstrap.ts";
+import {
+	lookupResumeEntry,
+	registerResumeIds,
+} from "../core/session/ResumeIndex.ts";
 import { ServerEventLog } from "../core/session/ServerEventLog.ts";
 import { Session } from "../core/session/Session.ts";
 import { SessionLifecycle } from "../core/session/SessionLifecycle.ts";
+import { activateSessionLogs } from "../core/session/SessionLogActivation.ts";
 import {
 	SessionStore,
 	sessionPathsForRoot,
@@ -66,6 +78,11 @@ import { palette } from "../ui/theme/palette.ts";
 import { ThemeProvider } from "../ui/theme/ThemeProvider.tsx";
 import { detectTerminalBg } from "../ui/theme/terminalBg.ts";
 import { createTheme, setTheme } from "../ui/theme/theme.ts";
+import {
+	activateResumeTarget,
+	type ResumeTarget,
+	resolveResumeTarget,
+} from "../ui/utils/resumeSession.ts";
 import { errorMessage } from "../utils/errors.ts";
 import { shortId } from "../utils/id.ts";
 import { pluralize } from "../utils/string.ts";
@@ -90,6 +107,7 @@ Options:
   --permission-mode <mode>   manual | acceptEdits | auto (prompt only for risky) | bypass (default: manual)
   --lsp                      Enable language-server diagnostics for this run
   --fresh                    Create a new Backboard assistant/thread for this run (isolated)
+  --resume <id>              Resume a Backboard or local BYOK session
   --login                    Sign in with Backboard
   --logout                   Remove saved Backboard credentials
   --help                     Show this help
@@ -117,10 +135,52 @@ async function main(): Promise<void> {
 	}
 	const interactiveRenderConfig = resolveInteractiveRenderConfig();
 
+	const requestedResume = earlyFlags.resume?.trim();
+	const indexedResume = requestedResume
+		? await lookupResumeEntry(requestedResume)
+		: null;
+	const resumeCwd = resolvePath(
+		earlyFlags.cwd ?? indexedResume?.cwd ?? process.cwd(),
+	);
+	const runtimeArgv =
+		earlyFlags.cwd === undefined && indexedResume
+			? [...argv, "--cwd", resumeCwd]
+			: argv;
+	const localResume = await resolveLocalResumeBootstrap(
+		resumeCwd,
+		earlyFlags.resume,
+		indexedResume?.sessionId,
+	);
+	if (requestedResume && isLocalResumeId(requestedResume) && !localResume) {
+		throw new Error(
+			`Local session "${requestedResume}" was not found in ${resumeCwd}. Run the command from its original workspace or pass --cwd <workspace>.`,
+		);
+	}
+	if (isRemoteResumeId(requestedResume) && resolveAuth().backboard === null) {
+		if (
+			earlyFlags.print !== undefined ||
+			earlyFlags.format === "json" ||
+			!process.stdin.isTTY ||
+			!process.stdout.isTTY
+		) {
+			throw new Error(
+				`Backboard sign-in is required to resume remote session "${requestedResume}".`,
+			);
+		}
+		const didLogin = await runLoginCommand();
+		if (!didLogin) {
+			process.exitCode = 1;
+			return;
+		}
+	}
 	let config: Config;
 	while (true) {
 		try {
-			config = new Config({ argv });
+			config = new Config({
+				argv: runtimeArgv,
+				resumeModel: localResume?.model,
+				allowUnauthenticatedResume: localResume !== null,
+			});
 			break;
 		} catch (err) {
 			const error = err instanceof Error ? err : String(err);
@@ -148,15 +208,23 @@ async function main(): Promise<void> {
 		);
 	}
 
-	const sessionId = shortId("sess");
+	const sessionId = localResume?.sessionId ?? shortId("sess");
 	const store = new SessionStore(sessionId, config.cwd);
-	await store.init({
-		sessionId,
-		createdAt: new Date().toISOString(),
+	if (localResume) {
+		await store.open();
+	} else {
+		await store.init({
+			sessionId,
+			createdAt: new Date().toISOString(),
+			cwd: config.cwd,
+			model: config.modelString,
+			profile: config.profile.name,
+		});
+	}
+	await registerResumeIds({
 		cwd: config.cwd,
-		model: config.modelString,
-		profile: config.profile.name,
-	});
+		sessionId,
+	}).catch(() => undefined);
 
 	const bus = new EventBus();
 	const clientLog = new ClientEventLog(sessionId, store.paths.clientLog);
@@ -329,25 +397,35 @@ async function main(): Promise<void> {
 		checkpoints,
 		store,
 		async (activeSessionId, paths) => {
-			await Promise.all([
-				clientLog.activate(activeSessionId, paths.clientLog).catch((error) =>
-					bus.emit({
-						type: "system:warning",
-						message: `Failed to rotate the client session log: ${errorMessage(error)}`,
-					}),
-				),
-				serverLog.activate(activeSessionId, paths.serverLog).catch((error) =>
-					bus.emit({
-						type: "system:warning",
-						message: `Failed to rotate the server session log: ${errorMessage(error)}`,
-					}),
-				),
-			]);
+			const previous = sessionLifecycle.current();
+			const previousPaths = sessionPathsForRoot(previous.sessionRoot);
+			await activateSessionLogs({
+				clientLog,
+				serverLog,
+				next: {
+					sessionId: activeSessionId,
+					clientLog: paths.clientLog,
+					serverLog: paths.serverLog,
+				},
+				previous: {
+					sessionId: previous.sessionId,
+					clientLog: previousPaths.clientLog,
+					serverLog: previousPaths.serverLog,
+				},
+			});
 			jsonStream?.activate(activeSessionId);
 			hookController.setSessionId(activeSessionId);
 		},
 	);
 	await sessionLifecycle.initialize();
+	const detachResumeIndex = bus.on("session:thread", (event) => {
+		const active = sessionLifecycle.current();
+		void registerResumeIds({
+			cwd: config.cwd,
+			sessionId: active.sessionId,
+			threadId: event.threadId,
+		}).catch(() => undefined);
+	});
 	const controller = new AgentController({
 		config,
 		bus,
@@ -370,6 +448,7 @@ async function main(): Promise<void> {
 	sweepStaleClipboardImages();
 	const flush = async (): Promise<void> => {
 		try {
+			detachResumeIndex();
 			await controller.dispose();
 			await lsp.shutdown();
 			await mcpManager.close();
@@ -382,6 +461,31 @@ async function main(): Promise<void> {
 			await sessionLifecycle.dispose();
 		}
 	};
+	let initialResumeTarget: ResumeTarget | undefined;
+	if (config.flags.resume !== undefined) {
+		try {
+			initialResumeTarget = await resolveResumeTarget(
+				client,
+				config.cwd,
+				config.flags.resume,
+			);
+			await activateResumeTarget(initialResumeTarget, {
+				config,
+				controller,
+				onResumeLocalSession: (id) => sessionLifecycle.resume(id),
+				onWarning: (message) => bus.emit({ type: "system:warning", message }),
+			});
+			const active = sessionLifecycle.current();
+			await registerResumeIds({
+				cwd: config.cwd,
+				sessionId: active.sessionId,
+				threadId: controller.threadId,
+			}).catch(() => undefined);
+		} catch (error) {
+			await flush();
+			throw error;
+		}
+	}
 
 	// Fire SessionStart at init so it runs even for prompt-less sessions.
 	await controller.start();
@@ -429,6 +533,7 @@ async function main(): Promise<void> {
 				client={client}
 				attachments={attachmentManager}
 				startupWarnings={startupWarnings}
+				initialResumeTarget={initialResumeTarget}
 				onLogin={(onDeviceCode) => loginWithBackboardSso({ onDeviceCode })}
 				onLogout={logoutSavedCredentials}
 				onNewSession={() => sessionLifecycle.startNew()}
@@ -445,11 +550,22 @@ async function main(): Promise<void> {
 		maxFps: interactiveRenderConfig.maxFps,
 	});
 
+	let activeId = controller.threadId ?? sessionLifecycle.current().sessionId;
 	try {
 		await instance.waitUntilExit();
 	} finally {
+		activeId = controller.threadId ?? sessionLifecycle.current().sessionId;
+		const active = sessionLifecycle.current();
+		await registerResumeIds({
+			cwd: config.cwd,
+			sessionId: active.sessionId,
+			threadId: controller.threadId,
+		}).catch(() => undefined);
 		await flush();
 	}
+	process.stdout.write(
+		`\nResume this session with: ${buildResumeCommand(argv, activeId, {})}\n`,
+	);
 }
 
 async function runAuthScreen(

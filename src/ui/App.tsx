@@ -63,18 +63,10 @@ import {
 import { checkForCliUpdate } from "../core/update/updateCheck.ts";
 import type { AgentClient } from "../providers/AgentClient.ts";
 import { fetchModels } from "../providers/backboard/models.ts";
-import {
-	backboardThreadToMessages,
-	threadDisplayTitle,
-} from "../providers/backboard/threads.ts";
 import type {
 	BackboardThread,
 	ModelInfo,
 } from "../providers/backboard/types.ts";
-import {
-	BYOK_SESSION_ID_METADATA_KEY,
-	BYOK_THREAD_METADATA_KEY,
-} from "../providers/byok/ByokClient.ts";
 import { errorMessage } from "../utils/errors.ts";
 import { pluralize } from "../utils/string.ts";
 import {
@@ -168,6 +160,13 @@ import { playCompletionNotification } from "./notify.ts";
 import { theme } from "./theme/theme.ts";
 import { composeSubmissionWithNotes } from "./utils/modelNotes.ts";
 import { refreshCredentials as refreshClientCredentials } from "./utils/refreshCredentials.ts";
+import {
+	activateResumeTarget,
+	hydrateResumeTarget,
+	isAlreadyActiveResume,
+	type ResumeTarget,
+	resolveResumeTarget,
+} from "./utils/resumeSession.ts";
 import { shouldReprintOnSettingsExit } from "./utils/settingsReprint.ts";
 import { startNewSession } from "./utils/startNewSession.ts";
 
@@ -184,6 +183,7 @@ interface Props {
 	checkpoints?: CheckpointManager;
 	attachments: AttachmentManager;
 	startupWarnings: readonly string[];
+	initialResumeTarget?: ResumeTarget;
 	onLogin: (
 		onDeviceCode?: (response: BackboardDeviceCodeResponse) => void,
 	) => Promise<string>;
@@ -268,6 +268,7 @@ export function App({
 	checkpoints,
 	attachments,
 	startupWarnings,
+	initialResumeTarget,
 	onLogin,
 	onLogout,
 	onNewSession,
@@ -301,6 +302,14 @@ export function App({
 		update: updateInfo,
 	};
 	const [mode, setMode] = useState<Mode>("normal");
+	const initialResumeApplied = useRef(false);
+	useEffect(() => {
+		if (!initialResumeTarget || initialResumeApplied.current) return;
+		initialResumeApplied.current = true;
+		agent.hydrateTranscript(initialResumeTarget.messages);
+		setShowBanner(false);
+		agent.notice(`Resumed session: ${initialResumeTarget.displayTitle}`);
+	}, [agent, initialResumeTarget]);
 	const [loadingLabel, setLoadingLabel] = useState("Loading");
 	const [models, setModels] = useState<ModelInfo[]>([]);
 	const refreshCredentials = useCallback((): void => {
@@ -1016,8 +1025,8 @@ export function App({
 		},
 		[agent, config, closeMemorySelector],
 	);
-	const resumeSession = useCallback(
-		async (thread: BackboardThread) => {
+	const applyResumeTarget = useCallback(
+		async (load: () => Promise<ResumeTarget>) => {
 			if (controller.hasActiveWork) {
 				agent.notice(
 					"Finish or cancel the current turn before switching sessions.",
@@ -1027,51 +1036,28 @@ export function App({
 				return;
 			}
 			try {
-				const hydratedThread = await client.getThread(thread.thread_id);
-				const messages = backboardThreadToMessages(hydratedThread);
+				const target = await load();
 				if (controller.hasActiveWork) {
 					throw new Error(
 						"A turn started while the session was loading. Cancel it before resuming.",
 					);
 				}
-				if (hydratedThread.metadata_?.[BYOK_THREAD_METADATA_KEY] === true) {
-					const sessionId =
-						hydratedThread.metadata_?.[BYOK_SESSION_ID_METADATA_KEY];
-					if (typeof sessionId !== "string" || sessionId.length === 0) {
-						throw new Error(
-							"Saved BYOK session is missing its local session id.",
-						);
-					}
-					await onResumeLocalSession(sessionId);
-					const provider = hydratedThread.metadata_?.model_provider;
-					const model = hydratedThread.metadata_?.model_name;
-					if (typeof provider === "string" && typeof model === "string") {
-						config.setModel({ provider, model });
-						agent.setModelLabel(`${provider}/${model}`);
-						controller.setModelContextLimit(null);
-						await config.saveRuntimeSelection().catch((error) => {
-							agent.notice(
-								`Session resumed, but saving its model failed: ${errorMessage(error)}`,
-								"error",
-							);
-						});
-					}
-				} else {
-					await onResumeRemoteSession();
-				}
-				if (stdout.isTTY) write(CLEAR_VISIBLE_SCREEN);
-				controller.hydrateSession({
-					threadId: hydratedThread.thread_id,
-					assistantId: hydratedThread.assistant_id,
-					messages,
+				await activateResumeTarget(target, {
+					config,
+					controller,
+					onResumeLocalSession,
+					onResumeRemoteSession,
+					onWarning: (message) => agent.notice(message, "error"),
 				});
-				agent.hydrateTranscript(messages);
-				const visibleMessages = messages.filter(
+				if (stdout.isTTY) write(CLEAR_VISIBLE_SCREEN);
+				agent.setModelLabel(config.modelString);
+				agent.hydrateTranscript(target.messages);
+				const visibleMessages = target.messages.filter(
 					(message) =>
 						message.role !== "assistant" || message.text.trim().length > 0,
 				).length;
 				agent.notice(
-					`Resumed session: ${threadDisplayTitle(hydratedThread)} · ${visibleMessages} ${pluralize(visibleMessages, "message")}`,
+					`Resumed session: ${target.displayTitle} · ${visibleMessages} ${pluralize(visibleMessages, "message")}`,
 				);
 				setShowBanner(false);
 				setMode("normal");
@@ -1085,7 +1071,6 @@ export function App({
 		},
 		[
 			agent,
-			client,
 			config,
 			controller,
 			onResumeLocalSession,
@@ -1093,6 +1078,24 @@ export function App({
 			stdout,
 			write,
 		],
+	);
+	const resumeSession = useCallback(
+		(thread: BackboardThread) =>
+			applyResumeTarget(() => hydrateResumeTarget(client, thread)),
+		[applyResumeTarget, client],
+	);
+	const resumeSessionById = useCallback(
+		(id: string) => {
+			if (isAlreadyActiveResume(id, controller.threadId)) {
+				agent.notice("That session is already active.");
+				setMode("normal");
+				return Promise.resolve();
+			}
+			return applyResumeTarget(() =>
+				resolveResumeTarget(client, config.cwd, id),
+			);
+		},
+		[agent, applyResumeTarget, client, config.cwd, controller.threadId],
 	);
 
 	const performRestore = useCallback(
@@ -1538,7 +1541,13 @@ export function App({
 					openSkillsSelector();
 					break;
 				case "sessions":
-					openSessionsSelector();
+					if (command.id) {
+						setLoadingLabel("Resuming session");
+						setMode("loading");
+						void resumeSessionById(command.id);
+					} else {
+						openSessionsSelector();
+					}
 					break;
 				case "notify": {
 					const next = !config.isNotifyEnabled;
@@ -1665,6 +1674,7 @@ export function App({
 			persistVerbose,
 			quit,
 			refreshMcpStatuses,
+			resumeSessionById,
 			running,
 			sessionEnded,
 			skillController,

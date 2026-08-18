@@ -658,6 +658,37 @@ describe("Config", () => {
 		expect(parseFlags(["--logout"]).logout).toBe(true);
 	});
 
+	it("parses resume IDs in separated and inline forms", () => {
+		expect(parseFlags(["--resume", "thread_1"]).resume).toBe("thread_1");
+		expect(parseFlags(["--resume=thread_2"]).resume).toBe("thread_2");
+		expect(parseFlags(["--resume"]).resume).toBe("");
+	});
+
+	it("allows a validated BYOK resume to bootstrap without Backboard SSO", async () => {
+		const homeDir = await mkdtemp(path.join(os.tmpdir(), "cli-config-"));
+		const config = new Config({
+			homeDir,
+			resumeModel: { provider: "anthropic", model: "claude-test" },
+			allowUnauthenticatedResume: true,
+		});
+		expect(config.hasBackboardAuth).toBe(false);
+		expect(config.model).toEqual({
+			provider: "anthropic",
+			model: "claude-test",
+		});
+	});
+
+	it("does not bypass authentication for an unvalidated resume model", async () => {
+		const homeDir = await mkdtemp(path.join(os.tmpdir(), "cli-config-"));
+		expect(
+			() =>
+				new Config({
+					homeDir,
+					resumeModel: { provider: "anthropic", model: "claude-test" },
+				}),
+		).toThrow("No credentials found");
+	});
+
 	it("defaults LSP off and parses the LSP flag", () => {
 		expect(parseFlags([]).lsp).toBeUndefined();
 		expect(parseFlags(["--lsp"]).lsp).toBe(true);

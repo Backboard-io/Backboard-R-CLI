@@ -356,14 +356,30 @@ or `computer` tools. Nesting is opt-in: an agent that sets `tools` must include
 
 ### Time budgets
 
-`timeoutMs` bounds a single run. When it expires the agent is not simply
-killed — it is asked, in one short final turn with no tools, to report what it
-established before running out. You get a partial answer with `status:
-timed_out` rather than nothing.
+`timeoutMs` bounds a single run. Exceeding it never throws the work away.
+
+For a top-level sub-agent, the budget expiring means the run **moves to the
+background and keeps going**. The tool returns immediately with a run id and the
+path to that agent's transcript, and the report arrives as its own turn once it
+finishes. This matters because a budget usually expires on a task that is merely
+slow — stopping it there would discard real progress and invite the agent to
+start the same work over.
+
+```text
+The sub-agent exceeded its time budget but is STILL RUNNING in the background
+(id: bg_7d8405b0). It has not failed and its work is not lost.
+Its transcript so far is at .backboard/sessions/<id>/agents/<call>/client.jsonl
+— read that to see where it is.
+```
+
+Where a handoff is impossible — a nested sub-agent, or a headless run, neither
+of which has anywhere to deliver a later report — expiry instead stops the run
+and spends one short tool-less turn asking what it established, returning
+`status: timed_out` with a partial answer.
 
 A budget is separate from `maxRounds`: rounds bound how many times the agent may
-call tools, the budget bounds wall-clock time, and whichever is reached first
-ends the run.
+call tools, the budget bounds wall-clock time. Rounds always end a run; the
+budget ends the *waiting*, not necessarily the work.
 
 ### Background agents
 

@@ -9,12 +9,12 @@ export type TurnStatus =
 	| "failed"
 	| "cancelled";
 
-/** A sub-agent running past the turn that spawned it. */
 export interface BackgroundRunSnapshot {
 	id: string;
 	agent: string;
 	label: string;
-	status: "running" | TurnStatus | "timed_out";
+	status: "running" | TurnStatus | "timed_out" | "backgrounded";
+	adopted?: boolean;
 	startedAt: number;
 	finishedAt?: number;
 	rounds: number;

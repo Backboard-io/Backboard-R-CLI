@@ -48,6 +48,8 @@ export interface ToolContext {
 	askQuestions?: AskQuestionsFn;
 	getTodos?: () => readonly TodoItem[];
 	agentDepth?: number;
+	/** No foreground turn is waiting on this chain, so budgets below stop enforcing. */
+	inBackgroundChain?: boolean;
 	trace?: ToolTraceContext;
 	/** Optional language-server service for post-edit diagnostics. */
 	lsp?: LspService;

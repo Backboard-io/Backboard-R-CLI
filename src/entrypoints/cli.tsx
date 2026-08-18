@@ -58,6 +58,7 @@ import { createDefaultTools } from "../tools/index.ts";
 import { App } from "../ui/App.tsx";
 import { AuthScreen } from "../ui/AuthScreen.tsx";
 import { CLEAR_VISIBLE_SCREEN } from "../ui/hooks/ResizeStabilizer.constants.ts";
+import { interactiveRenderOptions } from "../ui/renderOptions.ts";
 import { palette } from "../ui/theme/palette.ts";
 import { ThemeProvider } from "../ui/theme/ThemeProvider.tsx";
 import { detectTerminalBg } from "../ui/theme/terminalBg.ts";
@@ -430,10 +431,7 @@ async function main(): Promise<void> {
 			/>
 		</ThemeProvider>
 	);
-	const instance = render(app, {
-		exitOnCtrlC: false,
-		maxFps: 12,
-	});
+	const instance = render(app, interactiveRenderOptions(false));
 
 	try {
 		await instance.waitUntilExit();
@@ -462,10 +460,7 @@ async function runAuthScreen(): Promise<boolean> {
 			/>
 		</ThemeProvider>
 	);
-	const instance = render(app, {
-		exitOnCtrlC: true,
-		maxFps: 12,
-	});
+	const instance = render(app, interactiveRenderOptions(true));
 	await instance.waitUntilExit();
 	if (didLogin) {
 		instance.clear();

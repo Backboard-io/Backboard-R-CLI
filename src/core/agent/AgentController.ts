@@ -190,6 +190,9 @@ export class AgentController {
 		assistantId?: string | null;
 		messages: readonly Message[];
 	}): void {
+		// A just-finished background run may already have queued its report
+		// turn here; cancel it so it cannot land in the resumed conversation.
+		this.cancel({ clearQueue: true });
 		this.deps.backgroundSupervisor?.cancelAll();
 		this.deps.session.hydrate(input);
 	}

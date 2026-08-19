@@ -651,6 +651,60 @@ describe("revocableRecorder", () => {
 		expect(existsSync(fileB)).toBe(false);
 	});
 
+	it("rejects a revoked requireRevertible capture before any write happens", async () => {
+		const { bus, store } = makeStore();
+		const file = join(work, "f.txt");
+		await writeFile(file, "v0", "utf8");
+
+		startTurn(bus, "t1");
+		const { recorder, revoke } = revocableRecorder(store.scopedToTurn("t1"));
+		revoke();
+
+		await expect(
+			recorder.recordPreImage(file, ctx("t1", "c1"), {
+				tool: "ApplyPatch",
+				requireRevertible: true,
+			}),
+		).rejects.toThrow(/rolled back/);
+	});
+
+	it("drops a capture that was in flight when it was revoked", async () => {
+		const { bus, store } = makeStore();
+		const file = join(work, "f.txt");
+		await writeFile(file, "v0", "utf8");
+
+		startTurn(bus, "t1");
+		const { recorder, revoke } = revocableRecorder(store.scopedToTurn("t1"));
+		// Revocation lands while the capture's file I/O is still pending.
+		const capture = recorder.recordPreImage(file, ctx("t1", "c1"), {
+			tool: "Edit",
+		});
+		revoke();
+		await capture;
+		await writeFile(file, "v1", "utf8");
+		await recorder.recordPostImage(file, ctx("t1", "c1"), Buffer.from("v1"));
+		endTurn(bus, "t1");
+
+		expect(store.listCheckpoints()).toHaveLength(0);
+	});
+
+	it("rejects an in-flight requireRevertible capture once revoked", async () => {
+		const { bus, store } = makeStore();
+		const file = join(work, "f.txt");
+		await writeFile(file, "v0", "utf8");
+
+		startTurn(bus, "t1");
+		const { recorder, revoke } = revocableRecorder(store.scopedToTurn("t1"));
+		const capture = recorder.recordPreImage(file, ctx("t1", "c1"), {
+			tool: "ApplyPatch",
+			requireRevertible: true,
+		});
+		revoke();
+
+		await expect(capture).rejects.toThrow(/rolled back/);
+		expect(store.listCheckpoints()).toHaveLength(0);
+	});
+
 	it("revokes recorders a nested run re-scoped from it", async () => {
 		const { bus, store } = makeStore();
 		const file = join(work, "f.txt");

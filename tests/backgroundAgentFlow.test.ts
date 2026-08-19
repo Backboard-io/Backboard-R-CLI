@@ -11,6 +11,7 @@ import { emptyRuleSet } from "../src/core/permissions/PermissionRules.ts";
 import type { PermissionContext } from "../src/core/permissions/types.ts";
 import { Session } from "../src/core/session/Session.ts";
 import { SkillController } from "../src/core/skills/SkillController.ts";
+import { AbortError } from "../src/core/tools/ToolAbort.ts";
 import { ToolRegistry } from "../src/core/tools/ToolRegistry.ts";
 import type { BackboardClient } from "../src/providers/backboard/BackboardClient.ts";
 import type {
@@ -291,5 +292,113 @@ describe("background agent end-to-end", () => {
 
 		expect(supervisor.active).toHaveLength(0);
 		expect(reports).toEqual([]);
+	});
+
+	it("cancels a report turn already underway when a session is resumed", async () => {
+		const config = new Config({ env, argv: [] });
+		const bus = new EventBus();
+		const session = new Session("sess_bg4");
+		const supervisor = new BackgroundAgentSupervisor(bus);
+
+		let released!: () => void;
+		const agentWork = new Promise<void>((resolve) => {
+			released = resolve;
+		});
+
+		const agentTool = new AgentTool({
+			runner: {
+				run: async () => {
+					await agentWork;
+					return {
+						report: "stale report processed",
+						status: "completed" as const,
+						usage: {},
+						toolRounds: 1,
+					};
+				},
+			},
+			createRLMLoop: () => ({
+				run: async () => {
+					throw new Error("unused");
+				},
+			}),
+			getCatalog: () => new AgentCatalog([WATCHER, ...BUILT_IN_AGENTS]),
+			maxDepth: 2,
+			maxConcurrent: 8,
+			supervisor,
+		});
+
+		// The report turn's stream stalls until released and, like a real HTTP
+		// stream, honors the abort signal.
+		let releaseReport!: () => void;
+		const reportStream = new Promise<void>((resolve) => {
+			releaseReport = resolve;
+		});
+		const client = new (class extends ScriptedClient {
+			private turns = 0;
+			override async *runMessage(
+				req: SendMessageRequest,
+				options?: { signal?: AbortSignal },
+			): AsyncIterable<ProviderEvent> {
+				this.prompts.push(req.content ?? "");
+				this.turns++;
+				yield { kind: "thread", threadId: "thr_1" };
+				if (this.turns === 1) {
+					yield {
+						kind: "requires_action",
+						runId: "run_1",
+						calls: [
+							{
+								id: "call_1",
+								name: "agent",
+								input: { subagent_type: "watcher", prompt: "run the checks" },
+							},
+						],
+					};
+					return;
+				}
+				await reportStream;
+				if (options?.signal?.aborted) throw new AbortError();
+				yield { kind: "assistant_delta", text: "stale report processed" };
+				yield { kind: "completed" };
+			}
+		})();
+		const controller = new AgentController({
+			config,
+			bus,
+			session,
+			registry: new ToolRegistry([agentTool]),
+			client: client as unknown as BackboardClient,
+			skillController: new SkillController({ cwd: config.cwd, bus }),
+			permissions: PERMISSIONS,
+			backgroundSupervisor: supervisor,
+		});
+		supervisor.setNotifier((report) => {
+			void controller.submit(report, {
+				emitUserMessage: false,
+				priority: "later",
+			});
+		});
+
+		await controller.submit("start it");
+		expect(supervisor.active).toHaveLength(1);
+
+		// The run finishes and its report turn starts before the resume.
+		released();
+		await sleep(50);
+		expect(client.prompts).toHaveLength(2);
+		expect(supervisor.active).toHaveLength(0);
+
+		controller.hydrateSession({ threadId: "thr_other", messages: [] });
+		releaseReport();
+		await sleep(50);
+
+		expect(session.threadId).toBe("thr_other");
+		expect(
+			session
+				.getMessages()
+				.map((message) => (message.role === "tool" ? "" : message.text))
+				.join("\n"),
+		).not.toContain("stale report processed");
 	});
 });

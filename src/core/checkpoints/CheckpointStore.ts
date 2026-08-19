@@ -46,6 +46,8 @@ const BEGIN_SKIP_FRESH_MS = 2_000;
 export interface CheckpointCallContext {
 	turnId?: string;
 	toolCallId?: string;
+	/** Injected by revocable recorders; re-checked at commit time so an in-flight capture cannot journal after revocation. */
+	mayJournal?: () => boolean;
 }
 
 export interface RecordPreImageOptions {
@@ -112,20 +114,40 @@ function gatedRecorder(
 	gate: { live: boolean },
 ): CheckpointRecorder {
 	const noop = async (): Promise<void> => {};
+	const gatedCtx = (ctx: CheckpointCallContext): CheckpointCallContext => ({
+		...ctx,
+		mayJournal: () => gate.live && ctx.mayJournal?.() !== false,
+	});
 	return {
-		recordPreImage: (...args) =>
-			gate.live ? recorder.recordPreImage(...args) : noop(),
-		recordPostImage: (...args) =>
-			gate.live ? recorder.recordPostImage(...args) : noop(),
+		recordPreImage: (absPath, ctx, opts) => {
+			if (gate.live)
+				return recorder.recordPreImage(absPath, gatedCtx(ctx), opts);
+			if (opts?.requireRevertible)
+				return Promise.reject(revokedCaptureError(absPath));
+			return noop();
+		},
+		recordPostImage: (absPath, ctx, contentIfInMemory) =>
+			gate.live
+				? recorder.recordPostImage(absPath, gatedCtx(ctx), contentIfInMemory)
+				: noop(),
 		revertToolCall: (...args) => recorder.revertToolCall(...args),
-		beginShellCapture: (...args) =>
-			gate.live ? recorder.beginShellCapture(...args) : noop(),
-		endShellCapture: (...args) =>
-			gate.live ? recorder.endShellCapture(...args) : noop(),
+		beginShellCapture: (cwd, ctx) =>
+			gate.live ? recorder.beginShellCapture(cwd, gatedCtx(ctx)) : noop(),
+		endShellCapture: (ctx) =>
+			gate.live ? recorder.endShellCapture(gatedCtx(ctx)) : noop(),
 		captureWarning: () => (gate.live ? recorder.captureWarning() : null),
 		scopedToTurn: (turnId) =>
 			gatedRecorder(recorder.scopedToTurn(turnId), gate),
 	};
+}
+
+/** Raised for a `requireRevertible` capture requested after (or racing) revocation. */
+function revokedCaptureError(path: string): Error {
+	return new Error(
+		`Pre-image of ${resolve(path)} cannot be captured: the run's checkpoint ` +
+			"access was revoked when it moved to the background, so the write " +
+			"could not be rolled back; aborting before any modification",
+	);
 }
 
 export function scopeCheckpointRecorder(
@@ -265,9 +287,17 @@ export class CheckpointStore implements CheckpointRecorder {
 		const turnId = ctx.turnId ?? "detached";
 		const toolCallId = ctx.toolCallId ?? "unknown";
 		const tool = opts?.tool ?? "unknown";
-		this.ensureTurn(turnId);
+		// Re-checked after each await: an in-flight capture must not commit
+		// after revocation.
+		const revokedMidCapture = (): boolean => {
+			if (ctx.mayJournal?.() !== false) return false;
+			if (opts?.requireRevertible) throw revokedCaptureError(path);
+			return true;
+		};
 
 		const stats = await lstatOrNull(path);
+		if (revokedMidCapture()) return;
+		this.ensureTurn(turnId);
 		if (!stats) {
 			this.append({
 				type: "pre",
@@ -309,6 +339,7 @@ export class CheckpointStore implements CheckpointRecorder {
 		} else {
 			const content = await readFile(path);
 			const hash = await this.blobs.put(content);
+			if (revokedMidCapture()) return;
 			this.append({
 				type: "pre",
 				turnId,
@@ -338,7 +369,6 @@ export class CheckpointStore implements CheckpointRecorder {
 	): Promise<void> {
 		const path = resolve(absPath);
 		const turnId = ctx.turnId ?? "detached";
-		this.ensureTurn(turnId);
 
 		let postHash: string | null;
 		if (contentIfInMemory) {
@@ -347,6 +377,8 @@ export class CheckpointStore implements CheckpointRecorder {
 			const stats = await lstatOrNull(path);
 			postHash = stats?.isFile() ? sha256Hex(await readFile(path)) : null;
 		}
+		if (ctx.mayJournal?.() === false) return;
+		this.ensureTurn(turnId);
 		this.append({
 			type: "post",
 			turnId,
@@ -482,6 +514,8 @@ export class CheckpointStore implements CheckpointRecorder {
 				return;
 			}
 			this.shellLastStored = { snapshot: after, at: performance.now() };
+			// Revoked mid-walk: keep the refreshed baseline, journal nothing.
+			if (ctx.mayJournal?.() === false) return;
 			const diff = this.shellIndex.diff(before, after);
 			const changes = [...diff.created, ...diff.modified, ...diff.deleted];
 			if (changes.length === 0) return;

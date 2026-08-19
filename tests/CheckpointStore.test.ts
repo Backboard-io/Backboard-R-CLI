@@ -17,6 +17,7 @@ import { sha256Hex } from "../src/core/checkpoints/blobStore.ts";
 import {
 	CheckpointStore,
 	MAX_CAPTURE_BYTES,
+	revocableRecorder,
 } from "../src/core/checkpoints/CheckpointStore.ts";
 import type { SessionPaths } from "../src/core/session/SessionStore.ts";
 
@@ -605,5 +606,65 @@ describe("CheckpointStore", () => {
 		await undoLatest(store);
 
 		expect(events).toEqual([{ checkpointId: "t1", files: 1 }]);
+	});
+});
+
+describe("revocableRecorder", () => {
+	it("stops journaling into the turn once revoked", async () => {
+		const { bus, store } = makeStore();
+		const file = join(work, "f.txt");
+		await writeFile(file, "v0", "utf8");
+
+		startTurn(bus, "t1");
+		const { recorder, revoke } = revocableRecorder(store.scopedToTurn("t1"));
+		revoke();
+		await recorder.recordPreImage(file, ctx("t1", "c1"), { tool: "Edit" });
+		await writeFile(file, "v1", "utf8");
+		await recorder.recordPostImage(file, ctx("t1", "c1"), Buffer.from("v1"));
+		endTurn(bus, "t1");
+
+		expect(store.listCheckpoints()).toHaveLength(0);
+	});
+
+	it("still rolls back a tool call it pre-imaged before revocation", async () => {
+		const { bus, store } = makeStore();
+		const fileA = join(work, "a.txt");
+		const fileB = join(work, "b.txt");
+		await writeFile(fileA, "a v0", "utf8");
+
+		startTurn(bus, "t1");
+		const { recorder, revoke } = revocableRecorder(store.scopedToTurn("t1"));
+		await recorder.recordPreImage(fileA, ctx("t1", "c1"), {
+			tool: "ApplyPatch",
+		});
+		await recorder.recordPreImage(fileB, ctx("t1", "c1"), {
+			tool: "ApplyPatch",
+		});
+		await writeFile(fileA, "a v1", "utf8");
+		await recorder.recordPostImage(fileA, ctx("t1", "c1"), Buffer.from("a v1"));
+		await writeFile(fileB, "b created", "utf8");
+
+		revoke();
+		await recorder.revertToolCall("c1");
+
+		expect(await readFile(fileA, "utf8")).toBe("a v0");
+		expect(existsSync(fileB)).toBe(false);
+	});
+
+	it("revokes recorders a nested run re-scoped from it", async () => {
+		const { bus, store } = makeStore();
+		const file = join(work, "f.txt");
+		await writeFile(file, "v0", "utf8");
+
+		startTurn(bus, "t1");
+		const { recorder, revoke } = revocableRecorder(store.scopedToTurn("t1"));
+		const nested = recorder.scopedToTurn("subagent-turn");
+		revoke();
+		await nested.recordPreImage(file, ctx("t1", "c1"), { tool: "Edit" });
+		await writeFile(file, "v1", "utf8");
+		await nested.recordPostImage(file, ctx("t1", "c1"), Buffer.from("v1"));
+		endTurn(bus, "t1");
+
+		expect(store.listCheckpoints()).toHaveLength(0);
 	});
 });

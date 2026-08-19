@@ -220,6 +220,22 @@ describe("budgets inside a backgrounded chain", () => {
 		expect(client.finished).toBe(false);
 	});
 
+	it("still enforces the budget of the run that started in the background", async () => {
+		const client = new SlowClient(200);
+		const result = await runnerWith(client).run({
+			prompt: "watch the build",
+			definition: definition({ timeoutMs: 30, background: true }),
+			depth: 1,
+			parentCwd: process.cwd(),
+			parentSignal: new AbortController().signal,
+			chainInBackground: true,
+		});
+
+		expect(result.status).toBe("timed_out");
+		expect(result.report).toBe("partial progress");
+		expect(client.finished).toBe(false);
+	});
+
 	it("marks its own children as being in the background chain", async () => {
 		const probe = new TestTool({ name: "Read", readOnly: true });
 		const run = probe.execute.bind(probe);

@@ -22,7 +22,7 @@ export const BUILT_IN_AGENTS: readonly AgentDefinition[] = [
 		description:
 			"Analyzes the prompt and provided variables in a JavaScript REPL.",
 		mode: "rlm",
-		systemPrompt: subagent.prompt,
+		systemPrompt: "",
 		source: "built-in",
 	},
 ];

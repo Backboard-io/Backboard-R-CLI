@@ -17,6 +17,7 @@ export interface RLMDeps {
 	client: Pick<AgentClient, "sendMessage">;
 	model: ModelRef;
 	executor: REPLExecutor;
+	instructions?: string;
 	maxIterations?: number;
 	maxLLMCalls?: number;
 	maxOutputChars?: number;

@@ -241,7 +241,7 @@ export class AgentTool extends Tool<AgentToolInput, AgentToolOutput> {
 	private async runRlm(run: AgentRun): Promise<ToolResult<AgentToolOutput>> {
 		const { input, ctx, definition, trace, tracePath } = run;
 		const result = await this.gated(run, () =>
-			this.deps.createRLMLoop().run({
+			this.deps.createRLMLoop(definition).run({
 				prompt: input.prompt,
 				signal: ctx.signal,
 				timeoutMs: input.timeout_ms ?? definition.timeoutMs,

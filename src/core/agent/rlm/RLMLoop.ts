@@ -48,8 +48,10 @@ export class RLMLoop {
 	private readonly maxLLMCalls: number;
 	private readonly maxOutputChars: number;
 	private readonly timeoutSummaryMs: number;
+	private readonly instructions: string;
 
 	constructor(private readonly deps: RLMDeps) {
+		this.instructions = deps.instructions?.trim() ?? "";
 		this.maxIterations = deps.maxIterations ?? DEFAULT_RLM_MAX_ITERATIONS;
 		this.maxLLMCalls = deps.maxLLMCalls ?? DEFAULT_RLM_MAX_LLM_CALLS;
 		this.maxOutputChars = deps.maxOutputChars ?? DEFAULT_RLM_MAX_OUTPUT_CHARS;
@@ -261,14 +263,16 @@ export class RLMLoop {
 		nativeToolError?: string;
 	}> {
 		const resp = await this.completeRaw({
-			content: rlmActionPrompt({
-				prompt: input.prompt,
-				variables: input.variables,
-				trajectory: input.trajectory,
-				iteration: input.iteration,
-				maxIterations: this.maxIterations,
-				maxOutputChars: this.maxOutputChars,
-			}),
+			content: this.withInstructions(
+				rlmActionPrompt({
+					prompt: input.prompt,
+					variables: input.variables,
+					trajectory: input.trajectory,
+					iteration: input.iteration,
+					maxIterations: this.maxIterations,
+					maxOutputChars: this.maxOutputChars,
+				}),
+			),
 			threadId: input.threadId || undefined,
 			usage: input.usage,
 			signal: input.signal,
@@ -300,7 +304,9 @@ export class RLMLoop {
 		signal?: AbortSignal;
 	}): Promise<string> {
 		const resp = await this.completeRaw({
-			content: rlmExtractPrompt(input.prompt, input.trajectory),
+			content: this.withInstructions(
+				rlmExtractPrompt(input.prompt, input.trajectory),
+			),
 			usage: input.usage,
 			signal: input.signal,
 		});
@@ -322,12 +328,14 @@ export class RLMLoop {
 			return "RLM run cancelled before completion.";
 		try {
 			const resp = await this.completeRaw({
-				content: rlmTimedOutSummaryPrompt({
-					prompt: input.prompt,
-					trajectory: input.trajectory,
-					timeoutMs: input.timeoutMs,
-					reason: input.reason,
-				}),
+				content: this.withInstructions(
+					rlmTimedOutSummaryPrompt({
+						prompt: input.prompt,
+						trajectory: input.trajectory,
+						timeoutMs: input.timeoutMs,
+						reason: input.reason,
+					}),
+				),
 				usage: input.usage,
 				signal: input.signal,
 			});
@@ -343,6 +351,10 @@ export class RLMLoop {
 				return "RLM run cancelled before completion.";
 			return `RLM timed out after ${Math.ceil(input.timeoutMs / 1000)} seconds before producing a summary: ${errorMessage(err)}`;
 		}
+	}
+
+	private withInstructions(content: string): string {
+		return this.instructions ? `${this.instructions}\n\n${content}` : content;
 	}
 
 	private async completeText(input: {

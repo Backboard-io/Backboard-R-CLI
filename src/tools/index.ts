@@ -105,11 +105,17 @@ function buildAgentTool(deps: DefaultToolDeps, base: Tool[]): AgentTool {
 		...(deps.backgroundSupervisor
 			? { supervisor: deps.backgroundSupervisor }
 			: {}),
-		createRLMLoop: () =>
+		createRLMLoop: (definition) =>
 			new RLMLoop({
 				client: deps.client,
-				model: deps.config.model,
+				model: definition.model ?? deps.config.model,
 				executor: new LocalReplExecutor(),
+				...(definition.systemPrompt
+					? { instructions: definition.systemPrompt }
+					: {}),
+				...(definition.maxRounds !== undefined
+					? { maxIterations: definition.maxRounds }
+					: {}),
 			}),
 	});
 	holder.tool = agent;

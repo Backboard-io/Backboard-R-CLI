@@ -58,7 +58,10 @@ import { createDefaultTools } from "../tools/index.ts";
 import { App } from "../ui/App.tsx";
 import { AuthScreen } from "../ui/AuthScreen.tsx";
 import { CLEAR_VISIBLE_SCREEN } from "../ui/hooks/ResizeStabilizer.constants.ts";
-import { interactiveRenderOptions } from "../ui/renderOptions.ts";
+import {
+	interactiveRenderOptions,
+	resolveInteractiveRenderConfig,
+} from "../ui/renderOptions.ts";
 import { palette } from "../ui/theme/palette.ts";
 import { ThemeProvider } from "../ui/theme/ThemeProvider.tsx";
 import { detectTerminalBg } from "../ui/theme/terminalBg.ts";
@@ -229,10 +232,18 @@ async function main(): Promise<void> {
 					`Unknown --permission-mode "${config.flags.permissionMode}"; using ${permissions.mode} mode. Valid: ${PERMISSION_MODES.join(", ")}.`,
 				]
 			: [];
+	const interactiveRenderConfig = resolveInteractiveRenderConfig();
+	const renderWarnings = interactiveRenderConfig.warning
+		? [interactiveRenderConfig.warning]
+		: [];
 	// MCP init warnings (unset env vars, skipped/failed servers) are deliberately
 	// kept out of the startup surface — they cluttered every launch. Server status
 	// is still inspectable via /mcp; only the noisy startup emission is dropped.
-	const startupWarnings = [...hookConfig.warnings, ...permissionWarnings];
+	const startupWarnings = [
+		...hookConfig.warnings,
+		...permissionWarnings,
+		...renderWarnings,
+	];
 	for (const warning of startupWarnings) {
 		bus.emit({ type: "system:warning", message: warning });
 	}
@@ -433,7 +444,10 @@ async function main(): Promise<void> {
 	);
 	const instance = render(
 		app,
-		interactiveRenderOptions({ exitOnCtrlC: false }),
+		interactiveRenderOptions({
+			exitOnCtrlC: false,
+			maxFps: interactiveRenderConfig.maxFps,
+		}),
 	);
 
 	try {
@@ -463,7 +477,13 @@ async function runAuthScreen(): Promise<boolean> {
 			/>
 		</ThemeProvider>
 	);
-	const instance = render(app, interactiveRenderOptions({ exitOnCtrlC: true }));
+	const instance = render(
+		app,
+		interactiveRenderOptions({
+			exitOnCtrlC: true,
+			maxFps: resolveInteractiveRenderConfig().maxFps,
+		}),
+	);
 	await instance.waitUntilExit();
 	if (didLogin) {
 		instance.clear();

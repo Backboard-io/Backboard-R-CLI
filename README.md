@@ -354,6 +354,11 @@ Sub-agents cannot prompt you, so they never receive the `ask_user`, `browser`,
 or `computer` tools. Nesting is opt-in: an agent that sets `tools` must include
 `agent` to spawn sub-agents of its own, and nesting stops at two levels deep.
 
+An `rlm` agent has no tools to allow or deny, so `tools` and `disallowedTools`
+do not apply to it. The rest do: its body prefixes the prompts driving the REPL
+loop (but not the `llm_query` calls the loop's own code makes), `model` picks
+the model for those turns, and `maxRounds` caps REPL iterations.
+
 ### Time budgets
 
 `timeoutMs` bounds a single run. Exceeding it never throws the work away.
@@ -372,14 +377,16 @@ Its transcript so far is at .backboard/sessions/<id>/agents/<call>/client.jsonl
 — read that to see where it is.
 ```
 
-Where a handoff is impossible — a nested sub-agent, or a headless run, neither
-of which has anywhere to deliver a later report — expiry instead stops the run
+Where a handoff is impossible — a nested sub-agent, a headless run, or an agent
+that was already launched with `background: true` — expiry instead stops the run
 and spends one short tool-less turn asking what it established, returning
-`status: timed_out` with a partial answer.
+`status: timed_out` with a partial answer. For a background agent the budget is
+the only wall-clock bound it has, since nothing else is waiting on it, so it is
+enforced rather than waived.
 
-Inside a chain that already moved to the background, budgets stop applying
-entirely: nothing is waiting, so a nested run finishes and reports to its parent
-normally. `maxRounds` still bounds it.
+Below a run that moved to the background, budgets stop applying entirely:
+nothing is waiting on those nested runs, so each finishes and reports to its
+parent normally. `maxRounds` still bounds them.
 
 A budget is separate from `maxRounds`: rounds bound how many times the agent may
 call tools, the budget bounds wall-clock time. Rounds always end a run; the
@@ -416,8 +423,11 @@ Details worth knowing:
   anything you type, so a finished agent can never talk over you. If the session
   is idle when one finishes, it starts a turn on its own.
 - **Cancelling the foreground does not kill them.** Background agents run on
-  their own cancellation signal. They are stopped when you start a new thread or
-  exit.
+  their own cancellation signal. They are stopped when you start a new thread,
+  resume another session, or exit.
+- **`timeoutMs` still applies to them.** Nothing is waiting on a background
+  agent, so its budget is what stops it running forever; on expiry it reports
+  the partial progress it has.
 - **Only top-level spawns go to the background.** A sub-agent that spawns
   another one runs it inline regardless of the flag, so no agent is left without
   someone to report to.

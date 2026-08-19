@@ -233,4 +233,63 @@ describe("background agent end-to-end", () => {
 		expect(reports).toHaveLength(1);
 		expect(reports[0]).toContain("survived");
 	});
+
+	it("drops background reports when another session is resumed", async () => {
+		const config = new Config({ env, argv: [] });
+		const bus = new EventBus();
+		const session = new Session("sess_bg3");
+		const supervisor = new BackgroundAgentSupervisor(bus);
+
+		let released!: () => void;
+		const agentWork = new Promise<void>((resolve) => {
+			released = resolve;
+		});
+
+		const agentTool = new AgentTool({
+			runner: {
+				run: async () => {
+					await agentWork;
+					return {
+						report: "report for the discarded conversation",
+						status: "completed" as const,
+						usage: {},
+						toolRounds: 1,
+					};
+				},
+			},
+			createRLMLoop: () => ({
+				run: async () => {
+					throw new Error("unused");
+				},
+			}),
+			getCatalog: () => new AgentCatalog([WATCHER, ...BUILT_IN_AGENTS]),
+			maxDepth: 2,
+			maxConcurrent: 8,
+			supervisor,
+		});
+
+		const client = new ScriptedClient();
+		const controller = new AgentController({
+			config,
+			bus,
+			session,
+			registry: new ToolRegistry([agentTool]),
+			client: client as unknown as BackboardClient,
+			skillController: new SkillController({ cwd: config.cwd, bus }),
+			permissions: PERMISSIONS,
+			backgroundSupervisor: supervisor,
+		});
+		const reports: string[] = [];
+		supervisor.setNotifier((report) => reports.push(report));
+
+		await controller.submit("start it");
+		expect(supervisor.active).toHaveLength(1);
+
+		controller.hydrateSession({ threadId: "thr_other", messages: [] });
+		released();
+		await sleep(120);
+
+		expect(supervisor.active).toHaveLength(0);
+		expect(reports).toEqual([]);
+	});
 });

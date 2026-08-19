@@ -190,6 +190,7 @@ export class AgentController {
 		assistantId?: string | null;
 		messages: readonly Message[];
 	}): void {
+		this.deps.backgroundSupervisor?.cancelAll();
 		this.deps.session.hydrate(input);
 	}
 

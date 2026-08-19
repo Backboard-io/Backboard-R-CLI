@@ -98,26 +98,33 @@ export interface RevocableRecorder {
 export function revocableRecorder(
 	recorder: CheckpointRecorder,
 ): RevocableRecorder {
-	let live = true;
-	const noop = async (): Promise<void> => {};
+	const gate = { live: true };
 	return {
 		revoke: () => {
-			live = false;
+			gate.live = false;
 		},
-		recorder: {
-			recordPreImage: (...args) =>
-				live ? recorder.recordPreImage(...args) : noop(),
-			recordPostImage: (...args) =>
-				live ? recorder.recordPostImage(...args) : noop(),
-			revertToolCall: (...args) =>
-				live ? recorder.revertToolCall(...args) : noop(),
-			beginShellCapture: (...args) =>
-				live ? recorder.beginShellCapture(...args) : noop(),
-			endShellCapture: (...args) =>
-				live ? recorder.endShellCapture(...args) : noop(),
-			captureWarning: () => (live ? recorder.captureWarning() : null),
-			scopedToTurn: (turnId) => recorder.scopedToTurn(turnId),
-		},
+		recorder: gatedRecorder(recorder, gate),
+	};
+}
+
+function gatedRecorder(
+	recorder: CheckpointRecorder,
+	gate: { live: boolean },
+): CheckpointRecorder {
+	const noop = async (): Promise<void> => {};
+	return {
+		recordPreImage: (...args) =>
+			gate.live ? recorder.recordPreImage(...args) : noop(),
+		recordPostImage: (...args) =>
+			gate.live ? recorder.recordPostImage(...args) : noop(),
+		revertToolCall: (...args) => recorder.revertToolCall(...args),
+		beginShellCapture: (...args) =>
+			gate.live ? recorder.beginShellCapture(...args) : noop(),
+		endShellCapture: (...args) =>
+			gate.live ? recorder.endShellCapture(...args) : noop(),
+		captureWarning: () => (gate.live ? recorder.captureWarning() : null),
+		scopedToTurn: (turnId) =>
+			gatedRecorder(recorder.scopedToTurn(turnId), gate),
 	};
 }
 

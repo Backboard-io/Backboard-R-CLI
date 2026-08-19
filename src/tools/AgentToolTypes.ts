@@ -4,6 +4,7 @@ import type { RLMLoop } from "../core/agent/rlm/RLMLoop.ts";
 import type { JSONObject } from "../core/agent/rlm/RLMTypes.ts";
 import type { SubAgentRunner } from "../core/agent/SubAgentRunner.ts";
 import type { AgentCatalog } from "../core/agents/AgentCatalog.ts";
+import type { AgentDefinition } from "../core/agents/AgentDefinition.ts";
 import type { CheckpointRecorder } from "../core/checkpoints/CheckpointStore.ts";
 import type { HookController } from "../core/hooks/index.ts";
 import type { LspService } from "../core/lsp/index.ts";
@@ -26,7 +27,7 @@ export interface AgentToolInput {
 
 export interface AgentToolDeps {
 	runner: Pick<SubAgentRunner, "run">;
-	createRLMLoop: () => Pick<RLMLoop, "run">;
+	createRLMLoop: (definition: AgentDefinition) => Pick<RLMLoop, "run">;
 	getCatalog: () => AgentCatalog;
 	maxDepth: number;
 	maxConcurrent: number;

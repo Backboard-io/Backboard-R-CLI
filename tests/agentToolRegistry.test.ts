@@ -49,10 +49,12 @@ function makeTool(
 	tool: AgentTool;
 	workerCalls: SubAgentRunParams[];
 	rlmCalls: RLMRunParams[];
+	rlmDefinitions: AgentDefinition[];
 	release: () => void;
 } {
 	const workerCalls: SubAgentRunParams[] = [];
 	const rlmCalls: RLMRunParams[] = [];
+	const rlmDefinitions: AgentDefinition[] = [];
 	let release!: () => void;
 	const gate = new Promise<void>((resolve) => {
 		release = resolve;
@@ -71,8 +73,9 @@ function makeTool(
 				};
 			},
 		},
-		createRLMLoop: () => ({
+		createRLMLoop: (definition) => ({
 			run: async (params) => {
+				rlmDefinitions.push(definition);
 				rlmCalls.push(params);
 				return {
 					report: "rlm report",
@@ -87,7 +90,7 @@ function makeTool(
 		maxDepth: 2,
 		maxConcurrent,
 	});
-	return { tool, workerCalls, rlmCalls, release };
+	return { tool, workerCalls, rlmCalls, rlmDefinitions, release };
 }
 
 describe("AgentTool registry dispatch", () => {
@@ -111,6 +114,25 @@ describe("AgentTool registry dispatch", () => {
 		expect(result.data.mode).toBe("rlm");
 		expect(workerCalls).toHaveLength(0);
 		expect(rlmCalls[0]?.timeoutMs).toBe(60_000);
+	});
+
+	it("hands the rlm factory the definition so it can apply model and rounds", async () => {
+		const { tool, rlmDefinitions, release } = makeTool([
+			{
+				...ANALYST,
+				model: { provider: "anthropic", model: "claude-opus-5" },
+				maxRounds: 3,
+			},
+		]);
+		release();
+		await tool.execute({ prompt: "crunch", subagent_type: "analyst" }, ctx());
+
+		expect(rlmDefinitions[0]?.systemPrompt).toBe("You analyze.");
+		expect(rlmDefinitions[0]?.model).toEqual({
+			provider: "anthropic",
+			model: "claude-opus-5",
+		});
+		expect(rlmDefinitions[0]?.maxRounds).toBe(3);
 	});
 
 	it("lets an explicit timeout_ms override the definition budget", async () => {

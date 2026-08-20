@@ -114,6 +114,35 @@ describe("parseAgentFromMarkdown", () => {
 	});
 
 	it.each([
+		["/", "model: /"],
+		["missing model", "model: anthropic/"],
+		["missing provider", "model: /claude-opus-5"],
+		["whitespace parts", 'model: " / "'],
+	])("rejects a malformed model reference (%s)", (_label, line) => {
+		const result = parseAgentFromMarkdown(
+			`---\ndescription: d\n${line}\n---\nbody`,
+			"a",
+			"/a.md",
+			"project",
+		);
+		expect(result.agent).toBeUndefined();
+		expect(result.warning).toContain("invalid model");
+	});
+
+	it("trims whitespace around qualified model parts", () => {
+		const result = parseAgentFromMarkdown(
+			'---\ndescription: d\nmodel: " anthropic / claude-opus-5 "\n---\nbody',
+			"a",
+			"/a.md",
+			"project",
+		);
+		expect(result.agent?.model).toEqual({
+			provider: "anthropic",
+			model: "claude-opus-5",
+		});
+	});
+
+	it.each([
 		["missing frontmatter", "no frontmatter here", "missing YAML frontmatter"],
 		["missing description", "---\nname: a\n---\nbody", "missing description"],
 		["empty body", "---\ndescription: d\n---\n", "missing system prompt body"],

@@ -1,5 +1,5 @@
 import { parseDocument } from "yaml";
-import { parseModel } from "../../config/defaults.ts";
+import { type ModelRef, parseModel } from "../../config/defaults.ts";
 import type { AgentMode } from "../tools/AgentToolOutput.ts";
 import type { AgentDefinition, AgentSource } from "./AgentDefinition.ts";
 
@@ -67,9 +67,12 @@ export function parseAgentFromMarkdown(
 		return skip("disallowedTools must be a list of strings.");
 	}
 
-	const modelValue = stringValue(data.model);
-	const model =
-		modelValue && modelValue !== "inherit" ? parseModel(modelValue) : undefined;
+	const model = parseModelRef(data.model);
+	if (model === INVALID) {
+		return skip(
+			`invalid model '${stringValue(data.model)}' — use a model name, 'provider/model' with both parts set, or 'inherit'.`,
+		);
+	}
 
 	const maxRounds = positiveInt(data.maxRounds);
 	if (maxRounds === INVALID) {
@@ -107,6 +110,16 @@ export function parseAgentFromMarkdown(
 
 const INVALID = Symbol("invalid");
 type Invalid = typeof INVALID;
+
+function parseModelRef(value: unknown): ModelRef | undefined | Invalid {
+	const raw = stringValue(value);
+	if (!raw || raw === "inherit") return undefined;
+	const parsed = parseModel(raw);
+	const provider = parsed.provider.trim();
+	const model = parsed.model.trim();
+	if (!provider || !model) return INVALID;
+	return { provider, model };
+}
 
 function parseMode(value: unknown): AgentMode | null {
 	if (value === undefined) return "worker";

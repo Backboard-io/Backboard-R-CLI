@@ -35,7 +35,6 @@ export function createAgentClient(
 		byok,
 		getModel: () => config.model,
 		hasBackboardAuth: () => config.hasBackboardAuth,
-		hasKeyFor: (provider) =>
-			config.auth.providerKeys.some((entry) => entry.provider === provider),
+		hasKeyFor: (provider) => config.hasProviderKeyFor(provider),
 	});
 }

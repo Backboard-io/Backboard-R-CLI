@@ -676,6 +676,8 @@ describe("Config", () => {
 			provider: "anthropic",
 			model: "claude-test",
 		});
+		expect(config.hasProviderKeyFor("anthropic")).toBe(false);
+		expect(config.hasBackendForCurrentModel).toBe(false);
 	});
 
 	it("does not bypass authentication for an unvalidated resume model", async () => {

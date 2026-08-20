@@ -68,6 +68,16 @@ export const BYOK_THREAD_METADATA_KEY = "backboard_byok";
 export const BYOK_SESSION_ROOT_METADATA_KEY = "backboard_session_root";
 export const BYOK_SESSION_ID_METADATA_KEY = "backboard_session_id";
 
+export class ByokConversationNotFoundError extends Error {
+	readonly threadId: string;
+
+	constructor(threadId: string) {
+		super(`Saved conversation ${threadId} was not found.`);
+		this.name = "ByokConversationNotFoundError";
+		this.threadId = threadId;
+	}
+}
+
 /**
  * Drives direct vendor APIs behind the same contract as `BackboardClient`.
  *
@@ -548,7 +558,7 @@ export class ByokClient implements AgentClient {
 		const thread = this.threads.get(threadId);
 		if (thread?.durableSession) return liveThread(threadId, thread);
 		if (!thread) {
-			throw new Error(`Saved conversation ${threadId} was not found.`);
+			throw new ByokConversationNotFoundError(threadId);
 		}
 		return liveThread(threadId, thread);
 	}

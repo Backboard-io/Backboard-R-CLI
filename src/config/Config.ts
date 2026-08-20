@@ -340,6 +340,17 @@ export class Config {
 		return this.auth.providerKeys.length > 0;
 	}
 
+	hasProviderKeyFor(provider: string): boolean {
+		return this.auth.providerKeys.some((entry) => entry.provider === provider);
+	}
+
+	get hasBackendForCurrentModel(): boolean {
+		return (
+			this.hasBackboardAuth ||
+			this.hasProviderKeyFor(this.currentModel.provider)
+		);
+	}
+
 	/**
 	 * Re-reads credentials after `/login`, `/logout`, or a `/keys` change so the
 	 * running session picks them up without a restart.

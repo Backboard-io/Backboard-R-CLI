@@ -13,6 +13,7 @@ import { parseOutputFormat } from "../config/defaults.ts";
 import { parseFlags } from "../config/flags.ts";
 import { buildResumeCommand } from "../config/resumeCommand.ts";
 import {
+	canPromptForPermissions,
 	isHeadlessInvocation,
 	parseRequestedResume,
 } from "../config/resumePreflight.ts";
@@ -143,20 +144,21 @@ async function main(): Promise<void> {
 		throw new CliUserError(errorMessage(error));
 	}
 	const requestedResume = parseRequestedResume(earlyFlags.resume);
-	const indexedResume = requestedResume
-		? await lookupResumeEntry(requestedResume)
-		: null;
+	const indexedLocalResume =
+		requestedResume && isLocalResumeId(requestedResume)
+			? await lookupResumeEntry(requestedResume)
+			: null;
 	const resumeCwd = resolvePath(
-		earlyFlags.cwd ?? indexedResume?.cwd ?? process.cwd(),
+		earlyFlags.cwd ?? indexedLocalResume?.cwd ?? process.cwd(),
 	);
 	const runtimeArgv =
-		earlyFlags.cwd === undefined && indexedResume
+		earlyFlags.cwd === undefined && indexedLocalResume
 			? [...argv, "--cwd", resumeCwd]
 			: argv;
 	const localResume = await resolveLocalResumeBootstrap(
 		resumeCwd,
 		earlyFlags.resume,
-		indexedResume?.sessionId,
+		indexedLocalResume?.sessionId,
 	);
 	if (requestedResume && isLocalResumeId(requestedResume) && !localResume) {
 		throw new CliUserError(
@@ -165,8 +167,10 @@ async function main(): Promise<void> {
 	}
 	const remoteResumeId = isRemoteResumeId(requestedResume)
 		? requestedResume
-		: indexedResume?.threadId && !isByokThreadId(indexedResume.threadId)
-			? indexedResume.threadId
+		: !localResume &&
+				indexedLocalResume?.threadId &&
+				!isByokThreadId(indexedLocalResume.threadId)
+			? indexedLocalResume.threadId
 			: undefined;
 	if (remoteResumeId && resolveAuth().backboard === null) {
 		if (isHeadlessInvocation(earlyFlags, earlyFormat)) {
@@ -199,6 +203,19 @@ async function main(): Promise<void> {
 			process.stderr.write(`${errorMessage(err)}\n`);
 			process.exit(1);
 		}
+	}
+	const missingResumeBackend =
+		localResume !== null &&
+		(localResume.kind === "byok"
+			? !config.hasProviderKeyFor(config.model.provider)
+			: !config.hasBackendForCurrentModel);
+	if (
+		missingResumeBackend &&
+		isHeadlessInvocation(config.flags, config.format)
+	) {
+		throw new CliUserError(
+			`No backend can serve resumed model ${config.modelString}. Sign in with Backboard or enable its provider key before using --print or --format json.`,
+		);
 	}
 
 	// Rewrites a pre-encryption keys.json in place. Best-effort: a read-only or
@@ -296,11 +313,10 @@ async function main(): Promise<void> {
 	// Both --print and --format json run through runHeadless, which has no UI to
 	// answer an input:request. Anything that asks there would hang forever, so
 	// the gate must know there is nobody to prompt.
-	const headless = isHeadlessInvocation(config.flags, config.format);
 	const permissions = buildPermissionContext(
 		config.cwd,
 		config.flags.permissionMode,
-		!headless,
+		canPromptForPermissions(config.flags, config.format),
 	);
 	// Must go through startupWarnings (rendered by App/headless), not a pre-render
 	// bus.emit — the bus has no subscribers yet and doesn't replay.
@@ -311,10 +327,19 @@ async function main(): Promise<void> {
 					`Unknown --permission-mode "${config.flags.permissionMode}"; using ${permissions.mode} mode. Valid: ${PERMISSION_MODES.join(", ")}.`,
 				]
 			: [];
+	const resumeWarnings = missingResumeBackend
+		? [
+				`Session resumed, but no backend can serve ${config.modelString}. Use /keys, /login, or /model before sending a message.`,
+			]
+		: [];
 	// MCP init warnings (unset env vars, skipped/failed servers) are deliberately
 	// kept out of the startup surface — they cluttered every launch. Server status
 	// is still inspectable via /mcp; only the noisy startup emission is dropped.
-	const startupWarnings = [...hookConfig.warnings, ...permissionWarnings];
+	const startupWarnings = [
+		...hookConfig.warnings,
+		...permissionWarnings,
+		...resumeWarnings,
+	];
 	for (const warning of startupWarnings) {
 		bus.emit({ type: "system:warning", message: warning });
 	}
@@ -473,7 +498,7 @@ async function main(): Promise<void> {
 				client,
 				config.cwd,
 				config.flags.resume,
-				indexedResume,
+				indexedLocalResume,
 			);
 			await activateResumeTarget(initialResumeTarget, {
 				config,
@@ -556,12 +581,12 @@ async function main(): Promise<void> {
 		maxFps: 12,
 	});
 
-	let activeId = controller.threadId ?? sessionLifecycle.current().sessionId;
+	let activeId = sessionLifecycle.current().sessionId;
 	try {
 		await instance.waitUntilExit();
 	} finally {
-		activeId = controller.threadId ?? sessionLifecycle.current().sessionId;
 		const active = sessionLifecycle.current();
+		activeId = active.sessionId;
 		await registerResumeIds({
 			cwd: config.cwd,
 			sessionId: active.sessionId,

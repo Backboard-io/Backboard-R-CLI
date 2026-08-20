@@ -11,7 +11,9 @@ import type { BackboardThread } from "../src/providers/backboard/types.ts";
 import {
 	BYOK_SESSION_ID_METADATA_KEY,
 	BYOK_THREAD_METADATA_KEY,
+	ByokConversationNotFoundError,
 } from "../src/providers/byok/ByokClient.ts";
+import { BackendUnavailableError } from "../src/providers/ClientRouter.ts";
 import {
 	activateResumeTarget,
 	isAlreadyActiveResume,
@@ -81,6 +83,77 @@ describe("resolveResumeTarget", () => {
 		expect(target.messages).toHaveLength(1);
 	});
 
+	it("falls back to a local session when its indexed remote thread is gone", async () => {
+		const cwd = await mkdtemp(join(tmpdir(), "resume-session-"));
+		await mkdir(qSessionDir(cwd, "sess_deadbeef"), { recursive: true });
+		const client = fakeClient([]);
+		client.getThread = async () => {
+			throw new BackboardError("missing", 404, null);
+		};
+		const target = await resolveResumeTarget(client, cwd, "sess_deadbeef", {
+			cwd,
+			sessionId: "sess_deadbeef",
+			threadId: "thread_remote",
+			updatedAt: "2026-08-18T10:00:00Z",
+		});
+		expect(target.thread).toBeNull();
+		expect(target.localSessionId).toBe("sess_deadbeef");
+	});
+
+	it("falls back to a local session when its indexed BYOK thread is gone", async () => {
+		const cwd = await mkdtemp(join(tmpdir(), "resume-session-"));
+		await mkdir(qSessionDir(cwd, "sess_deadbeef"), { recursive: true });
+		const client = fakeClient([]);
+		client.getThread = async () => {
+			throw new ByokConversationNotFoundError("byok_deadbeef");
+		};
+		const target = await resolveResumeTarget(client, cwd, "sess_deadbeef", {
+			cwd,
+			sessionId: "sess_deadbeef",
+			threadId: "byok_deadbeef",
+			updatedAt: "2026-08-18T10:00:00Z",
+		});
+		expect(target.thread).toBeNull();
+		expect(target.localSessionId).toBe("sess_deadbeef");
+	});
+
+	it("falls back locally when the indexed backend is unavailable", async () => {
+		const cwd = await mkdtemp(join(tmpdir(), "resume-session-"));
+		await mkdir(qSessionDir(cwd, "sess_deadbeef"), { recursive: true });
+		const client = fakeClient([]);
+		client.getThread = async () => {
+			throw new BackendUnavailableError({
+				provider: "anthropic",
+				model: "claude-test",
+			});
+		};
+		const target = await resolveResumeTarget(client, cwd, "sess_deadbeef", {
+			cwd,
+			sessionId: "sess_deadbeef",
+			threadId: "thread_remote",
+			updatedAt: "2026-08-18T10:00:00Z",
+		});
+		expect(target.thread).toBeNull();
+		expect(target.localSessionId).toBe("sess_deadbeef");
+	});
+
+	it("preserves transient indexed-thread failures", async () => {
+		const cwd = await mkdtemp(join(tmpdir(), "resume-session-"));
+		await mkdir(qSessionDir(cwd, "sess_deadbeef"), { recursive: true });
+		const client = fakeClient([]);
+		client.getThread = async () => {
+			throw new Error("network unavailable");
+		};
+		await expect(
+			resolveResumeTarget(client, cwd, "sess_deadbeef", {
+				cwd,
+				sessionId: "sess_deadbeef",
+				threadId: "thread_remote",
+				updatedAt: "2026-08-18T10:00:00Z",
+			}),
+		).rejects.toThrow("network unavailable");
+	});
+
 	it("rejects unknown IDs", async () => {
 		await expect(
 			resolveResumeTarget(fakeClient([]), "/tmp/project", "byok_deadbeef"),
@@ -145,6 +218,7 @@ describe("resolveResumeTarget", () => {
 			model_name: "claude-test",
 		});
 		const config = {
+			flags: {},
 			setModel: () => {},
 			saveRuntimeSelection: async () => {
 				saved++;
@@ -173,6 +247,46 @@ describe("resolveResumeTarget", () => {
 
 		expect(saved).toBe(0);
 		expect(hydratedThreadIds).toEqual(["byok_deadbeef"]);
+	});
+
+	it("preserves an explicit CLI model while hydrating a BYOK session", async () => {
+		let modelChanges = 0;
+		let contextResets = 0;
+		const thread = savedThread("byok_deadbeef", {
+			[BYOK_THREAD_METADATA_KEY]: true,
+			[BYOK_SESSION_ID_METADATA_KEY]: "*************",
+			model_provider: "anthropic",
+			model_name: "claude-test",
+		});
+		const config = {
+			flags: { model: "openai/gpt-test" },
+			setModel: () => {
+				modelChanges++;
+			},
+		} as unknown as Config;
+		const controller = {
+			setModelContextLimit: () => {
+				contextResets++;
+			},
+			hydrateSession: () => {},
+		} as unknown as AgentController;
+
+		await activateResumeTarget(
+			{
+				displayTitle: "Saved work",
+				thread,
+				messages: [],
+				localSessionId: "sess_1234abcd",
+			},
+			{
+				config,
+				controller,
+				onResumeLocalSession: async () => {},
+			},
+		);
+
+		expect(modelChanges).toBe(0);
+		expect(contextResets).toBe(0);
 	});
 });
 

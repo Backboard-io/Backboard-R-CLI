@@ -37,6 +37,18 @@ export interface ClientRouterDeps {
 	hasKeyFor: (provider: string) => boolean;
 }
 
+export class BackendUnavailableError extends Error {
+	readonly model: ModelRef;
+
+	constructor(model: ModelRef) {
+		super(
+			`No backend can serve ${formatModel(model)}. Sign in with Backboard or add a key with /keys.`,
+		);
+		this.name = "BackendUnavailableError";
+		this.model = model;
+	}
+}
+
 /**
  * Routes each request to the backend that can serve it.
  *
@@ -258,9 +270,7 @@ export class ClientRouter implements AgentClient {
 		const source = this.sourceFor(model);
 		const client = source === "byok" ? this.deps.byok : this.backboard();
 		if (!client) {
-			throw new Error(
-				`No backend can serve ${formatModel(model)}. Sign in with Backboard or add a key with /keys.`,
-			);
+			throw new BackendUnavailableError(model);
 		}
 		return client;
 	}

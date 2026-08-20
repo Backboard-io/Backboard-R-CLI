@@ -310,9 +310,12 @@ export function App({
 		if (!initialResumeTarget || initialResumeApplied.current) return;
 		initialResumeApplied.current = true;
 		agent.hydrateTranscript(initialResumeTarget.messages);
+		for (const warning of startupWarnings) {
+			agent.notice(warning, "info");
+		}
 		setShowBanner(false);
 		agent.notice(`Resumed session: ${initialResumeTarget.displayTitle}`);
-	}, [agent, initialResumeTarget]);
+	}, [agent, initialResumeTarget, startupWarnings]);
 	const [loadingLabel, setLoadingLabel] = useState("Loading");
 	const [models, setModels] = useState<ModelInfo[]>([]);
 	const refreshCredentials = useCallback((): void => {

@@ -3,7 +3,7 @@ import { dirname, isAbsolute, join, resolve } from "node:path";
 import { qUserConfigDir } from "../../config/paths.ts";
 import { acquireFileLease } from "../../utils/FileLease.ts";
 import { ensureDir, writePrivateFileAtomic } from "../../utils/fs.ts";
-import { isSessionId } from "../../utils/id.ts";
+import { isByokThreadId, isSessionId } from "../../utils/id.ts";
 
 const RESUME_INDEX_VERSION = 1;
 const RESUME_INDEX_FILE = "session-index.json";
@@ -58,7 +58,8 @@ export async function registerResumeIds(
 		const file = await readResumeIndex(homeDir);
 		const existing = file.entries[input.sessionId];
 		const threadId = requestedThreadId ?? existing?.threadId;
-		const previousOwner = threadId ? file.entries[threadId] : undefined;
+		const previousOwner =
+			threadId && isByokThreadId(threadId) ? file.entries[threadId] : undefined;
 		if (
 			previousOwner &&
 			previousOwner.sessionId !== input.sessionId &&
@@ -81,7 +82,7 @@ export async function registerResumeIds(
 			delete file.entries[existing.threadId];
 		}
 		file.entries[input.sessionId] = entry;
-		if (threadId) file.entries[threadId] = entry;
+		if (threadId && isByokThreadId(threadId)) file.entries[threadId] = entry;
 		await writeResumeIndex(path, file);
 	} finally {
 		await lease.release();
@@ -154,7 +155,7 @@ function isResumeIndexEntry(
 				: undefined;
 		return isSessionId(id)
 			? id === value.sessionId
-			: threadId !== undefined && threadId.length > 0 && id === threadId;
+			: threadId !== undefined && isByokThreadId(id) && id === threadId;
 	}
 	return false;
 }

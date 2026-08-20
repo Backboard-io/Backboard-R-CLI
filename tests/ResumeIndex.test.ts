@@ -63,15 +63,16 @@ describe("resume index", () => {
 		expect(await lookupResumeEntry("sess_1234abcd", homeDir)).toMatchObject({
 			threadId: "thread_remote",
 		});
+		expect(await lookupResumeEntry("thread_remote", homeDir)).toBeNull();
 	});
 
-	it("clears the previous session owner when a thread alias moves", async () => {
+	it("clears the previous session owner when a BYOK thread alias moves", async () => {
 		const homeDir = await mkdtemp(join(tmpdir(), "resume-index-home-"));
 		await registerResumeIds(
 			{
 				cwd: "/workspace",
 				sessionId: "sess_11111111",
-				threadId: "thread_remote",
+				threadId: "byok_deadbeef",
 			},
 			homeDir,
 		);
@@ -79,14 +80,14 @@ describe("resume index", () => {
 			{
 				cwd: "/workspace",
 				sessionId: "sess_22222222",
-				threadId: "thread_remote",
+				threadId: "byok_deadbeef",
 			},
 			homeDir,
 		);
 		expect(
 			(await lookupResumeEntry("sess_11111111", homeDir))?.threadId,
 		).toBeUndefined();
-		expect(await lookupResumeEntry("thread_remote", homeDir)).toMatchObject({
+		expect(await lookupResumeEntry("byok_deadbeef", homeDir)).toMatchObject({
 			sessionId: "sess_22222222",
 		});
 	});

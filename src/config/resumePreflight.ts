@@ -41,3 +41,13 @@ export function isHeadlessInvocation(
 		!io.stdoutIsTTY
 	);
 }
+
+export function canPromptForPermissions(
+	flags: Pick<CliFlags, "print">,
+	format: OutputFormat,
+	io: { stdinIsTTY: boolean } = {
+		stdinIsTTY: Boolean(process.stdin.isTTY),
+	},
+): boolean {
+	return flags.print === undefined && format !== "json" && io.stdinIsTTY;
+}

@@ -17,7 +17,9 @@ import type { BackboardThread } from "../../providers/backboard/types.ts";
 import {
 	BYOK_SESSION_ID_METADATA_KEY,
 	BYOK_THREAD_METADATA_KEY,
+	ByokConversationNotFoundError,
 } from "../../providers/byok/ByokClient.ts";
+import { BackendUnavailableError } from "../../providers/ClientRouter.ts";
 import { isByokThreadId, isSessionId } from "../../utils/id.ts";
 
 export interface ResumeTarget {
@@ -41,6 +43,9 @@ export async function resolveResumeTarget(
 	indexedResume: ResumeIndexEntry | null = null,
 ): Promise<ResumeTarget> {
 	const normalized = parseRequestedResume(id);
+	const hasLocalSession =
+		isSessionId(normalized) &&
+		(await isDirectory(qSessionDir(cwd, normalized)));
 
 	if (isSessionId(normalized)) {
 		if (
@@ -53,12 +58,16 @@ export async function resolveResumeTarget(
 				);
 				return { ...target, localSessionId: normalized };
 			} catch (error) {
-				if (!(error instanceof BackboardError) || error.status !== 404) {
+				if (
+					!hasLocalSession ||
+					(!isMissingResumeThread(error) &&
+						!(error instanceof BackendUnavailableError))
+				) {
 					throw error;
 				}
-				throw new CliUserError(
-					`Backboard session "${indexedResume.threadId}" was not found for local session "${normalized}".`,
-				);
+				if (error instanceof BackendUnavailableError) {
+					return localResumeTarget(normalized);
+				}
 			}
 		}
 	}
@@ -67,9 +76,7 @@ export async function resolveResumeTarget(
 		try {
 			return resumeTargetFromHydratedThread(await client.getThread(normalized));
 		} catch (error) {
-			if (!(error instanceof BackboardError) || error.status !== 404) {
-				throw error;
-			}
+			if (!isMissingResumeThread(error)) throw error;
 		}
 	}
 
@@ -81,16 +88,8 @@ export async function resolveResumeTarget(
 	);
 	if (listed) return hydrateResumeTarget(client, listed);
 
-	if (
-		isSessionId(normalized) &&
-		(await isDirectory(qSessionDir(cwd, normalized)))
-	) {
-		return {
-			displayTitle: normalized,
-			thread: null,
-			messages: [],
-			localSessionId: normalized,
-		};
+	if (isSessionId(normalized) && hasLocalSession) {
+		return localResumeTarget(normalized);
 	}
 
 	throw new CliUserError(`Session "${normalized}" was not found.`);
@@ -146,7 +145,11 @@ export async function activateResumeTarget(
 	if (thread.metadata_?.[BYOK_THREAD_METADATA_KEY] === true) {
 		const provider = thread.metadata_?.model_provider;
 		const model = thread.metadata_?.model_name;
-		if (typeof provider === "string" && typeof model === "string") {
+		if (
+			options.config.flags.model === undefined &&
+			typeof provider === "string" &&
+			typeof model === "string"
+		) {
 			options.config.setModel({ provider, model });
 			options.controller.setModelContextLimit(null);
 		}
@@ -174,4 +177,20 @@ async function isDirectory(path: string): Promise<boolean> {
 	} catch {
 		return false;
 	}
+}
+
+function isMissingResumeThread(error: unknown): boolean {
+	return (
+		(error instanceof BackboardError && error.status === 404) ||
+		error instanceof ByokConversationNotFoundError
+	);
+}
+
+function localResumeTarget(sessionId: string): ResumeTarget {
+	return {
+		displayTitle: sessionId,
+		thread: null,
+		messages: [],
+		localSessionId: sessionId,
+	};
 }

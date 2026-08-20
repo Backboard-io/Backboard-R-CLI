@@ -8,10 +8,11 @@ import {
 } from "../src/ui/hooks/ResizeStabilizer.constants.ts";
 import { type InkTty, makeInkTty } from "./inkHarness.ts";
 
-function renderAuthScreen(tty: InkTty) {
+function renderAuthScreen(tty: InkTty, warnings: readonly string[] = []) {
 	return render(
 		React.createElement(AuthScreen, {
 			onLogin: () => new Promise<string>(() => {}),
+			warnings,
 		}),
 		{
 			stdout: tty.stdout as unknown as NodeJS.WriteStream,
@@ -25,6 +26,15 @@ function renderAuthScreen(tty: InkTty) {
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 describe("AuthScreen resize handling", () => {
+	it("shows interactive render configuration warnings", async () => {
+		const tty = makeInkTty(80, 45);
+		const instance = renderAuthScreen(tty, ["Invalid render setting"]);
+		await sleep(20);
+		instance.unmount();
+
+		expect(tty.written()).toContain("Invalid render setting");
+	});
+
 	it("clears screen and scrollback when the terminal is resized", async () => {
 		const tty = makeInkTty(80, 45);
 		const instance = renderAuthScreen(tty);

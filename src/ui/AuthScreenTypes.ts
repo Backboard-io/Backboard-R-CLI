@@ -15,6 +15,7 @@ export type AuthLoginHandler = (
 
 export interface AuthScreenProps {
 	onLogin: AuthLoginHandler;
+	warnings?: readonly string[];
 	/** Drives the BYOK branch; omit to offer Backboard sign-in only. */
 	keys?: ProviderKeyController;
 	/** Called once a provider key is saved, so startup can retry with it. */

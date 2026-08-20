@@ -1,29 +1,14 @@
-import type { RenderOptions } from "ink";
+import { truncate } from "../utils/string.ts";
+import { sanitizeForTerminal } from "../utils/terminalSafe.ts";
 
 const DEFAULT_INTERACTIVE_RENDER_MAX_FPS = 30;
 const MIN_INTERACTIVE_RENDER_MAX_FPS = 1;
 const MAX_INTERACTIVE_RENDER_MAX_FPS = 120;
-
-interface InteractiveRenderOptionsInput {
-	exitOnCtrlC: boolean;
-	maxFps: number;
-}
-
-type InteractiveRenderOptions = Pick<RenderOptions, "exitOnCtrlC" | "maxFps">;
-
-export function interactiveRenderOptions({
-	exitOnCtrlC,
-	maxFps,
-}: InteractiveRenderOptionsInput): InteractiveRenderOptions {
-	return {
-		exitOnCtrlC,
-		maxFps,
-	};
-}
+const MAX_RENDER_ENV_VALUE_LENGTH = 120;
 
 export interface InteractiveRenderConfig {
 	maxFps: number;
-	warning?: string;
+	warnings: string[];
 }
 
 export function resolveInteractiveRenderConfig(
@@ -31,12 +16,15 @@ export function resolveInteractiveRenderConfig(
 ): InteractiveRenderConfig {
 	const normalized = value?.trim();
 	if (!normalized) {
-		return { maxFps: DEFAULT_INTERACTIVE_RENDER_MAX_FPS };
+		return { maxFps: DEFAULT_INTERACTIVE_RENDER_MAX_FPS, warnings: [] };
 	}
 	if (!/^-?\d+$/.test(normalized)) {
+		const displayedValue = displayRenderEnvValue(value ?? "");
 		return {
 			maxFps: DEFAULT_INTERACTIVE_RENDER_MAX_FPS,
-			warning: `Invalid BACKBOARD_MAX_FPS "${value}"; using ${DEFAULT_INTERACTIVE_RENDER_MAX_FPS}. Expected an integer from ${MIN_INTERACTIVE_RENDER_MAX_FPS} to ${MAX_INTERACTIVE_RENDER_MAX_FPS}.`,
+			warnings: [
+				`Invalid BACKBOARD_MAX_FPS ${displayedValue}; using ${DEFAULT_INTERACTIVE_RENDER_MAX_FPS}. Expected an integer from ${MIN_INTERACTIVE_RENDER_MAX_FPS} to ${MAX_INTERACTIVE_RENDER_MAX_FPS}.`,
+			],
 		};
 	}
 
@@ -46,10 +34,18 @@ export function resolveInteractiveRenderConfig(
 		Math.max(MIN_INTERACTIVE_RENDER_MAX_FPS, parsed),
 	);
 	if (maxFps !== parsed) {
+		const displayedValue = displayRenderEnvValue(value ?? "");
 		return {
 			maxFps,
-			warning: `BACKBOARD_MAX_FPS "${value}" is outside ${MIN_INTERACTIVE_RENDER_MAX_FPS}-${MAX_INTERACTIVE_RENDER_MAX_FPS}; using ${maxFps}.`,
+			warnings: [
+				`BACKBOARD_MAX_FPS ${displayedValue} is outside ${MIN_INTERACTIVE_RENDER_MAX_FPS}-${MAX_INTERACTIVE_RENDER_MAX_FPS}; using ${maxFps}.`,
+			],
 		};
 	}
-	return { maxFps };
+	return { maxFps, warnings: [] };
+}
+
+function displayRenderEnvValue(value: string): string {
+	const sanitized = sanitizeForTerminal(value).replace(/\s+/g, " ").trim();
+	return JSON.stringify(truncate(sanitized, MAX_RENDER_ENV_VALUE_LENGTH));
 }

@@ -7,16 +7,18 @@ import type { RenderTranscriptItem, RunStatus } from "../../state/AppState.ts";
 import { Banner } from "./Banner.tsx";
 import { Item } from "./MessageList.tsx";
 
+export interface StaticTranscriptBanner {
+	status: RunStatus;
+	model: string;
+	cwd: string;
+	usage: UsageInfo;
+	update?: StartupUpdateInfo | null;
+}
+
 interface Props {
 	items: RenderTranscriptItem[];
 	generation: number;
-	banner: {
-		status: RunStatus;
-		model: string;
-		cwd: string;
-		usage: UsageInfo;
-		update?: StartupUpdateInfo | null;
-	} | null;
+	banner: StaticTranscriptBanner | null;
 }
 
 type StaticTranscriptItem =
@@ -54,7 +56,10 @@ function StaticTranscriptComponent({
 		: items;
 
 	return (
-		<Static key={generation} items={staticItems}>
+		<Static
+			key={`${generation}:${banner === null ? "plain" : "banner"}`}
+			items={staticItems}
+		>
 			{(item) =>
 				item.kind === "banner" ? (
 					<Banner
@@ -73,20 +78,4 @@ function StaticTranscriptComponent({
 	);
 }
 
-export function shouldReuseStaticTranscript(
-	previous: Props,
-	next: Props,
-): boolean {
-	if (previous.generation !== next.generation) return false;
-	if (previous.items.length !== next.items.length) return false;
-	// <Static> is append-only. Banner changes are picked up when generation
-	// changes and the transcript is intentionally reprinted. During ordinary
-	// App updates, avoid touching Ink's internal_static node because that
-	// bypasses maxFps and forces an immediate render.
-	return previous.items.every((item, index) => item === next.items[index]);
-}
-
-export const StaticTranscript = memo(
-	StaticTranscriptComponent,
-	shouldReuseStaticTranscript,
-);
+export const StaticTranscript = memo(StaticTranscriptComponent);

@@ -441,6 +441,18 @@ describe("Store reducer", () => {
 		expect(state.render.assistantStreams[0]?.pendingText).toBe("second");
 	});
 
+	it("preserves static item identity while a delta remains buffered", () => {
+		const state = initialState("gpt-test");
+		const next = reduce(state, {
+			type: "assistant:delta",
+			turnId: "turn_1",
+			messageId: "turn_1:assistant:0",
+			text: "partial",
+		});
+
+		expect(next.render.staticItems).toBe(state.render.staticItems);
+	});
+
 	it("commits long no-newline streaming progressively and bounds the pending tail", () => {
 		let state = initialState("gpt-test");
 		state = reduce(state, {

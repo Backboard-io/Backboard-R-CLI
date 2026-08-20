@@ -157,7 +157,10 @@ import { TerminalSizeProvider } from "./hooks/TerminalSizeContext.tsx";
 import { useAgent } from "./hooks/useAgent.ts";
 import { useLspToggle } from "./hooks/useLspToggle.ts";
 import { useResizeStabilizer } from "./hooks/useResizeStabilizer.ts";
-import { useStableTranscriptLayout } from "./hooks/useStableTranscriptLayout.ts";
+import {
+	useStableStaticBanner,
+	useStableTranscriptLayout,
+} from "./hooks/useStableTranscriptLayout.ts";
 import { useStartupPickerPreload } from "./hooks/useStartupPickerPreload.ts";
 import { VerboseProvider } from "./hooks/VerboseContext.tsx";
 import type { PromptHistoryState, QueuedPromptItem } from "./input/types.ts";
@@ -1691,6 +1694,15 @@ export function App({
 		}),
 		agent.state.render.generation,
 	);
+	const staticGeneration =
+		agent.state.render.generation +
+		resize.resizeEpoch +
+		verboseEpoch +
+		updateEpoch;
+	const staticBanner = useStableStaticBanner(
+		showBanner ? banner : null,
+		staticGeneration,
+	);
 	const liveItems = compactLiveTranscriptItems(agent.state.render.liveItems);
 
 	if (resize.isResizing) {
@@ -1703,13 +1715,8 @@ export function App({
 				<Box flexDirection="column">
 					<StaticTranscript
 						items={transcriptLayout.staticItems}
-						generation={
-							agent.state.render.generation +
-							resize.resizeEpoch +
-							verboseEpoch +
-							updateEpoch
-						}
-						banner={showBanner ? banner : null}
+						generation={staticGeneration}
+						banner={staticBanner}
 					/>
 					<MessageList
 						items={[...transcriptLayout.responsiveItems, ...liveItems]}

@@ -53,6 +53,7 @@ export function AuthScreen({
 	onLogin,
 	keys,
 	onKeySaved,
+	warnings = [],
 }: AuthScreenProps): React.ReactElement {
 	const app = useApp();
 	const actions = keys ? AUTH_ACTIONS_WITH_BYOK : AUTH_ACTIONS_LOGIN_ONLY;
@@ -199,6 +200,11 @@ export function AuthScreen({
 	return (
 		<Box flexDirection="column">
 			<AuthPrompt selected={selected} columns={columns} />
+			{warnings.map((warning) => (
+				<Text key={warning} color={theme.warning}>
+					{warning}
+				</Text>
+			))}
 			{error ? <Text color={theme.error}>{error}</Text> : null}
 		</Box>
 	);

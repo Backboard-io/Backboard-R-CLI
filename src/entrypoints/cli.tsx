@@ -58,6 +58,10 @@ import { createDefaultTools } from "../tools/index.ts";
 import { App } from "../ui/App.tsx";
 import { AuthScreen } from "../ui/AuthScreen.tsx";
 import { CLEAR_VISIBLE_SCREEN } from "../ui/hooks/ResizeStabilizer.constants.ts";
+import {
+	type InteractiveRenderConfig,
+	resolveInteractiveRenderConfig,
+} from "../ui/renderOptions.ts";
 import { palette } from "../ui/theme/palette.ts";
 import { ThemeProvider } from "../ui/theme/ThemeProvider.tsx";
 import { detectTerminalBg } from "../ui/theme/terminalBg.ts";
@@ -111,6 +115,7 @@ async function main(): Promise<void> {
 		await runLogoutCommand();
 		return;
 	}
+	const interactiveRenderConfig = resolveInteractiveRenderConfig();
 
 	let config: Config;
 	while (true) {
@@ -120,7 +125,7 @@ async function main(): Promise<void> {
 		} catch (err) {
 			const error = err instanceof Error ? err : String(err);
 			if (shouldShowAuthScreen(error, earlyFlags)) {
-				const didLogin = await runAuthScreen();
+				const didLogin = await runAuthScreen(interactiveRenderConfig);
 				if (!didLogin) return;
 				continue;
 			}
@@ -228,10 +233,15 @@ async function main(): Promise<void> {
 					`Unknown --permission-mode "${config.flags.permissionMode}"; using ${permissions.mode} mode. Valid: ${PERMISSION_MODES.join(", ")}.`,
 				]
 			: [];
+	const renderWarnings = headless ? [] : interactiveRenderConfig.warnings;
 	// MCP init warnings (unset env vars, skipped/failed servers) are deliberately
 	// kept out of the startup surface — they cluttered every launch. Server status
 	// is still inspectable via /mcp; only the noisy startup emission is dropped.
-	const startupWarnings = [...hookConfig.warnings, ...permissionWarnings];
+	const startupWarnings = [
+		...hookConfig.warnings,
+		...permissionWarnings,
+		...renderWarnings,
+	];
 	for (const warning of startupWarnings) {
 		bus.emit({ type: "system:warning", message: warning });
 	}
@@ -432,7 +442,7 @@ async function main(): Promise<void> {
 	);
 	const instance = render(app, {
 		exitOnCtrlC: false,
-		maxFps: 12,
+		maxFps: interactiveRenderConfig.maxFps,
 	});
 
 	try {
@@ -442,7 +452,9 @@ async function main(): Promise<void> {
 	}
 }
 
-async function runAuthScreen(): Promise<boolean> {
+async function runAuthScreen(
+	interactiveRenderConfig: InteractiveRenderConfig,
+): Promise<boolean> {
 	let didLogin = false;
 	const { hex: terminalBg } = await detectTerminalBg(palette.bg);
 	const uiTheme = createTheme(terminalBg);
@@ -451,6 +463,7 @@ async function runAuthScreen(): Promise<boolean> {
 		<ThemeProvider value={uiTheme}>
 			<AuthScreen
 				keys={new ProviderKeyController()}
+				warnings={interactiveRenderConfig.warnings}
 				onKeySaved={() => {
 					didLogin = true;
 				}}
@@ -464,7 +477,7 @@ async function runAuthScreen(): Promise<boolean> {
 	);
 	const instance = render(app, {
 		exitOnCtrlC: true,
-		maxFps: 12,
+		maxFps: interactiveRenderConfig.maxFps,
 	});
 	await instance.waitUntilExit();
 	if (didLogin) {

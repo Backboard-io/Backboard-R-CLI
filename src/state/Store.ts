@@ -561,7 +561,10 @@ function appendAssistantDelta(
 		...state,
 		render: {
 			...state.render,
-			staticItems: [...state.render.staticItems, ...chunks],
+			staticItems:
+				chunks.length === 0
+					? state.render.staticItems
+					: [...state.render.staticItems, ...chunks],
 			liveItems: state.render.liveItems.filter(
 				(item) => item.id !== assistantLiveId(flushedStream.messageId),
 			),

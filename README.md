@@ -318,12 +318,16 @@ Most users do not need environment variables.
 | `BACKBOARD_API_URL`                  | Override the API base URL; defaults to `https://app.backboard.io/api` |
 | `BACKBOARD_OAUTH_CLIENT_ID`          | Override the first-party public OAuth client ID                       |
 | `BACKBOARD_ALLOW_INSECURE_API_URL=1` | Permit a non-HTTPS API URL for internal development                   |
+| `BACKBOARD_MAX_FPS`                  | Set interactive rendering to 1-120 FPS; defaults to 30                |
 | `BROWSER_PATH`                     | Use a specific Chrome or Chromium executable                          |
 | `BROWSER_CDP_URL`                  | Connect the Browser tool to an existing CDP HTTP endpoint             |
 | `BROWSER_WS_URL`                   | Connect the Browser tool to an existing CDP WebSocket endpoint        |
 
 Environment variables override saved Backboard credentials where applicable.
 Never commit real credentials to `.env`.
+
+Lower `BACKBOARD_MAX_FPS` for slow SSH or tmux connections, or raise it to 60
+or 120 on faster local terminals.
 
 ## Run from source
 

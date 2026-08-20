@@ -1,21 +1,24 @@
 import { Static } from "ink";
 import type React from "react";
+import { memo } from "react";
 import type { UsageInfo } from "../../core/bus/events.ts";
 import type { StartupUpdateInfo } from "../../core/update/startupNotice.ts";
 import type { RenderTranscriptItem, RunStatus } from "../../state/AppState.ts";
 import { Banner } from "./Banner.tsx";
 import { Item } from "./MessageList.tsx";
 
+export interface StaticTranscriptBanner {
+	status: RunStatus;
+	model: string;
+	cwd: string;
+	usage: UsageInfo;
+	update?: StartupUpdateInfo | null;
+}
+
 interface Props {
 	items: RenderTranscriptItem[];
 	generation: number;
-	banner: {
-		status: RunStatus;
-		model: string;
-		cwd: string;
-		usage: UsageInfo;
-		update?: StartupUpdateInfo | null;
-	} | null;
+	banner: StaticTranscriptBanner | null;
 }
 
 type StaticTranscriptItem =
@@ -30,7 +33,7 @@ type StaticTranscriptItem =
 			update?: StartupUpdateInfo | null;
 	  };
 
-export function StaticTranscript({
+function StaticTranscriptComponent({
 	items,
 	generation,
 	banner,
@@ -53,7 +56,10 @@ export function StaticTranscript({
 		: items;
 
 	return (
-		<Static key={generation} items={staticItems}>
+		<Static
+			key={`${generation}:${banner === null ? "plain" : "banner"}`}
+			items={staticItems}
+		>
 			{(item) =>
 				item.kind === "banner" ? (
 					<Banner
@@ -71,3 +77,5 @@ export function StaticTranscript({
 		</Static>
 	);
 }
+
+export const StaticTranscript = memo(StaticTranscriptComponent);

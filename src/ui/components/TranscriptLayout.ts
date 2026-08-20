@@ -11,15 +11,27 @@ export function splitResponsiveTranscript(
 	tailItemCount = RESPONSIVE_TRANSCRIPT_TAIL_ITEMS,
 	minimumStaticItemCount = 0,
 ): TranscriptLayout {
-	const desiredSplitIndex = Math.max(0, items.length - tailItemCount);
-	const splitIndex = Math.min(
+	const splitIndex = responsiveTranscriptSplitIndex(
 		items.length,
-		Math.max(desiredSplitIndex, minimumStaticItemCount),
+		tailItemCount,
+		minimumStaticItemCount,
 	);
 	return {
 		staticItems: items.slice(0, splitIndex),
 		responsiveItems: items.slice(splitIndex),
 	};
+}
+
+export function responsiveTranscriptSplitIndex(
+	itemCount: number,
+	tailItemCount = RESPONSIVE_TRANSCRIPT_TAIL_ITEMS,
+	minimumStaticItemCount = 0,
+): number {
+	const desiredSplitIndex = Math.max(0, itemCount - tailItemCount);
+	return Math.min(
+		itemCount,
+		Math.max(desiredSplitIndex, minimumStaticItemCount),
+	);
 }
 
 export function compactLiveTranscriptItems(

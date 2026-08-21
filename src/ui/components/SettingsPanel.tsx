@@ -9,6 +9,7 @@ import { SelectRow } from "./SelectRow.tsx";
 
 export interface SettingsState {
 	memory: MemoryMode;
+	expert: ExpertSettingsState;
 	verbose: boolean;
 	notify: boolean;
 	lsp: boolean;
@@ -17,6 +18,14 @@ export interface SettingsState {
 	computerUse: boolean;
 	discover: boolean;
 }
+
+export interface ExpertSettingsState {
+	enabled: boolean;
+	/** The remembered pick, shown even while off so the choice stays visible. */
+	model: string | null;
+}
+
+export type SettingsOpenId = "memory" | "expert";
 
 export type SettingsToggleId =
 	| "verbose"
@@ -28,7 +37,7 @@ export type SettingsToggleId =
 
 export type SettingsRow =
 	| {
-			id: "memory";
+			id: SettingsOpenId;
 			kind: "open";
 			label: string;
 			value: string;
@@ -58,6 +67,13 @@ export function settingsRows(state: SettingsState): SettingsRow[] {
 			label: "Memory",
 			value: MEMORY_LABELS[state.memory],
 			description: "Persistent memory mode",
+		},
+		{
+			id: "expert",
+			kind: "open",
+			label: "Expert",
+			value: expertValue(state.expert),
+			description: "Plan here, implement on a second model",
 		},
 		{
 			id: "verbose",
@@ -105,6 +121,11 @@ export function settingsRows(state: SettingsState): SettingsRow[] {
 	];
 }
 
+function expertValue(expert: ExpertSettingsState): string {
+	if (!expert.enabled || !expert.model) return "Off";
+	return expert.model;
+}
+
 function valueText(row: SettingsRow): string {
 	if (row.kind === "toggle") {
 		if (row.pending) return "○ …";
@@ -116,14 +137,14 @@ function valueText(row: SettingsRow): string {
 interface Props {
 	state: SettingsState;
 	onToggle: (id: SettingsToggleId) => void;
-	onOpenMemory: () => void;
+	onOpen: (id: SettingsOpenId) => void;
 	onClose: () => void;
 }
 
 export function SettingsPanel({
 	state,
 	onToggle,
-	onOpenMemory,
+	onOpen,
 	onClose,
 }: Props): React.ReactElement {
 	const rows = settingsRows(state);
@@ -144,7 +165,7 @@ export function SettingsPanel({
 				if (row.pending) return;
 				onToggle(row.id);
 			} else {
-				onOpenMemory();
+				onOpen(row.id);
 			}
 		}
 	});
@@ -177,7 +198,10 @@ function SettingsRowView({
 	valueWidth: number;
 }): React.ReactElement {
 	const nameColor = selected ? theme.accentBright : theme.subtle;
-	const on = row.kind === "toggle" && row.enabled && !row.pending;
+	const on =
+		row.kind === "toggle"
+			? row.enabled && !row.pending
+			: row.id === "expert" && row.value !== "Off";
 	const valueColor = on
 		? theme.success
 		: selected && row.kind === "open"

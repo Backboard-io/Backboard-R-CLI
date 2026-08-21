@@ -1,7 +1,9 @@
 import type { Config } from "../../config/Config.ts";
+import { formatModel } from "../../config/defaults.ts";
 import { qSessionDir } from "../../config/paths.ts";
 import { createRuntimeThinkingResolver } from "../../config/thinkingRuntime.ts";
 import { toPromptProfileId } from "../../prompts/profiles/ids.ts";
+import { buildExpertModePrompt } from "../../prompts/system/expertMode.tsx";
 import { getSystemPrompt } from "../../prompts/system/index.tsx";
 import { TODO_NOT_CALLED_REMINDER } from "../../prompts/todoReminders.ts";
 import type { AgentClient } from "../../providers/AgentClient.ts";
@@ -437,6 +439,13 @@ export class AgentController {
 					computerUseEnabled: config.isComputerUseEnabled,
 					browserUseEnabled: config.isBrowserUseEnabled,
 					skillDiscoveryEnabled: config.isSkillDiscoveryEnabled,
+					...(config.isExpertModeEnabled
+						? {
+								expertModePrompt: buildExpertModePrompt(
+									formatModel(config.executionModel),
+								),
+							}
+						: {}),
 					startupEnvironmentPrompt: this.deps.startupEnvironmentPrompt,
 					hookContext: joinHookContext(
 						this.deps.hookController?.baseContext,

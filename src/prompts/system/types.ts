@@ -7,6 +7,8 @@ export interface SystemPromptOptions {
 	computerUseEnabled?: boolean;
 	browserUseEnabled?: boolean;
 	skillDiscoveryEnabled?: boolean;
+	/** Present only while expert mode is on; names the execution model. */
+	expertModePrompt?: string;
 	skillCatalog?: SkillCatalog;
 	activatedSkillsPrompt?: string;
 	hookContext?: string;

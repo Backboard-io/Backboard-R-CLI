@@ -6,6 +6,7 @@ import {
 
 const BASE: SettingsState = {
 	memory: "auto",
+	expert: { enabled: false, model: null },
 	verbose: false,
 	notify: false,
 	lsp: false,
@@ -16,10 +17,11 @@ const BASE: SettingsState = {
 };
 
 describe("settingsRows", () => {
-	it("lists memory as the only opener followed by the toggle rows", () => {
+	it("lists the openers first, then the toggle rows", () => {
 		const rows = settingsRows(BASE);
 		expect(rows.map((row) => row.id)).toEqual([
 			"memory",
+			"expert",
 			"verbose",
 			"notify",
 			"lsp",
@@ -32,6 +34,26 @@ describe("settingsRows", () => {
 			label: "Memory",
 			value: "Auto",
 		});
+		expect(rows.find((row) => row.id === "expert")).toMatchObject({
+			kind: "open",
+			label: "Expert",
+			value: "Off",
+		});
+	});
+
+	it("shows the execution model on the expert row once it is on", () => {
+		const value = (expert: SettingsState["expert"]): string | undefined => {
+			const row = settingsRows({ ...BASE, expert }).find(
+				(entry) => entry.id === "expert",
+			);
+			return row?.kind === "open" ? row.value : undefined;
+		};
+		expect(value({ enabled: true, model: "moonshot/kimi-k3" })).toBe(
+			"moonshot/kimi-k3",
+		);
+		// A remembered pick with the switch off still reads as off.
+		expect(value({ enabled: false, model: "moonshot/kimi-k3" })).toBe("Off");
+		expect(value({ enabled: true, model: null })).toBe("Off");
 	});
 
 	it("reports on/off state for the toggle rows", () => {

@@ -4,6 +4,7 @@ import { Writable } from "node:stream";
 import { render } from "ink";
 import React from "react";
 import {
+	type SettingsOpenId,
 	SettingsPanel,
 	type SettingsState,
 	type SettingsToggleId,
@@ -11,6 +12,7 @@ import {
 
 const BASE: SettingsState = {
 	memory: "auto",
+	expert: { enabled: false, model: null },
 	verbose: false,
 	notify: false,
 	lsp: false,
@@ -79,13 +81,13 @@ function makeTty() {
 function renderPanel(state: SettingsState = BASE) {
 	const tty = makeTty();
 	const onToggle = mock((_id: SettingsToggleId) => {});
-	const onOpenMemory = mock(() => {});
+	const onOpen = mock((_id: SettingsOpenId) => {});
 	const onClose = mock(() => {});
 	const instance = render(
 		React.createElement(SettingsPanel, {
 			state,
 			onToggle,
-			onOpenMemory,
+			onOpen,
 			onClose,
 		}),
 		{
@@ -102,35 +104,52 @@ function renderPanel(state: SettingsState = BASE) {
 	return {
 		instance,
 		press: tty.press,
+		lastFrame: tty.lastFrame,
 		ready,
 		selected,
 		onToggle,
-		onOpenMemory,
+		onOpen,
 		onClose,
 	};
 }
 
 describe("SettingsPanel interaction", () => {
 	it("opens the memory selector when Enter is pressed on the initial row", async () => {
-		const { instance, press, ready, onOpenMemory, onToggle } = renderPanel();
+		const { instance, press, ready, onOpen, onToggle } = renderPanel();
 		await ready();
 		press(ENTER);
-		await waitFor(() => onOpenMemory.mock.calls.length === 1);
+		await waitFor(() => onOpen.mock.calls.length === 1);
 		instance.unmount();
+		expect(onOpen).toHaveBeenCalledWith("memory");
+		expect(onToggle).not.toHaveBeenCalled();
+	});
+
+	it("opens the expert row from the second position", async () => {
+		const { instance, press, ready, selected, onOpen, onToggle } =
+			renderPanel();
+		await ready();
+		press(DOWN);
+		await selected("Expert");
+		press(ENTER);
+		await waitFor(() => onOpen.mock.calls.length === 1);
+		instance.unmount();
+		expect(onOpen).toHaveBeenCalledWith("expert");
 		expect(onToggle).not.toHaveBeenCalled();
 	});
 
 	it("moves down to the first toggle row and dispatches its id on Enter", async () => {
-		const { instance, press, ready, selected, onToggle, onOpenMemory } =
+		const { instance, press, ready, selected, onToggle, onOpen } =
 			renderPanel();
 		await ready();
+		press(DOWN);
+		await selected("Expert");
 		press(DOWN);
 		await selected("Verbose");
 		press(ENTER);
 		await waitFor(() => onToggle.mock.calls.length === 1);
 		instance.unmount();
 		expect(onToggle).toHaveBeenCalledWith("verbose");
-		expect(onOpenMemory).not.toHaveBeenCalled();
+		expect(onOpen).not.toHaveBeenCalled();
 	});
 
 	it("wraps to the last row when moving up from the first", async () => {
@@ -145,7 +164,7 @@ describe("SettingsPanel interaction", () => {
 	});
 
 	it("wraps back to the first row when moving down from the last", async () => {
-		const { instance, press, ready, selected, onOpenMemory, onToggle } =
+		const { instance, press, ready, selected, onOpen, onToggle } =
 			renderPanel();
 		await ready();
 		press(UP);
@@ -153,8 +172,9 @@ describe("SettingsPanel interaction", () => {
 		press(DOWN);
 		await selected("Memory");
 		press(ENTER);
-		await waitFor(() => onOpenMemory.mock.calls.length === 1);
+		await waitFor(() => onOpen.mock.calls.length === 1);
 		instance.unmount();
+		expect(onOpen).toHaveBeenCalledWith("memory");
 		expect(onToggle).not.toHaveBeenCalled();
 	});
 
@@ -164,6 +184,8 @@ describe("SettingsPanel interaction", () => {
 			lspPending: true,
 		});
 		await ready();
+		press(DOWN);
+		await selected("Expert");
 		press(DOWN);
 		await selected("Verbose");
 		press(DOWN);
@@ -175,6 +197,18 @@ describe("SettingsPanel interaction", () => {
 		await selected("Browser");
 		instance.unmount();
 		expect(onToggle).not.toHaveBeenCalled();
+	});
+
+	it("shows the execution model on the expert row", async () => {
+		const { instance, ready, lastFrame } = renderPanel({
+			...BASE,
+			expert: { enabled: true, model: "moonshot/kimi-k3" },
+		});
+		await ready();
+		const frame = lastFrame();
+		instance.unmount();
+		expect(frame).toContain("Expert");
+		expect(frame).toContain("moonshot/kimi-k3");
 	});
 
 	it("closes the panel when Esc is pressed", async () => {

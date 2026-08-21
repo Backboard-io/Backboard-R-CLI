@@ -74,24 +74,32 @@ function buildAgentTool(deps: DefaultToolDeps, base: Tool[]): AgentTool {
 	const holder: { tool?: AgentTool } = {};
 	const getCatalog = () => deps.getAgentCatalog?.() ?? BUILT_IN_CATALOG;
 
+	// Sub-agents are where implementation happens, so they run on the execution
+	// model and against the delegated policy — expert mode narrows the parent,
+	// never the worker that has to do the work.
+	const executionView = () => ({
+		model: deps.config.executionModel,
+		thinkingIntent: deps.config.executionThinking,
+	});
+
 	const runner = new SubAgentRunner({
 		client: deps.client,
-		getModel: () => deps.config.model,
+		getModel: () => deps.config.executionModel,
 		memory: deps.config.memory,
 		memoryProfile: deps.config.memoryProfile,
-		getThinking: () => resolveRuntimeThinking(deps.config, deps.client),
+		getThinking: () => resolveRuntimeThinking(executionView(), deps.client),
 		getThinkingResolver: () =>
-			createRuntimeThinkingResolver(deps.config, deps.client),
+			createRuntimeThinkingResolver(executionView(), deps.client),
 		toolFactory: ({ definition }) => {
 			const registry = new ToolRegistry([...(deps.getTools?.() ?? base)]);
 			return selectDelegatableTools({
 				definition,
-				candidates: deps.config.toolPolicy.visibleTools(registry),
+				candidates: deps.config.delegatedToolPolicy.visibleTools(registry),
 				agentTool: holder.tool,
-				isToolEnabled: (name) => deps.config.isToolEnabled(name),
+				isToolEnabled: (name) => deps.config.isDelegatedToolEnabled(name),
 			});
 		},
-		isToolEnabled: (name) => deps.config.isToolEnabled(name),
+		isToolEnabled: (name) => deps.config.isDelegatedToolEnabled(name),
 		hookController: deps.hookController,
 		lsp: deps.lsp,
 		checkpoints: deps.checkpoints,
@@ -108,7 +116,7 @@ function buildAgentTool(deps: DefaultToolDeps, base: Tool[]): AgentTool {
 		createRLMLoop: (definition) =>
 			new RLMLoop({
 				client: deps.client,
-				model: definition.model ?? deps.config.model,
+				model: definition.model ?? deps.config.executionModel,
 				executor: new LocalReplExecutor(),
 				...(definition.systemPrompt
 					? { instructions: definition.systemPrompt }

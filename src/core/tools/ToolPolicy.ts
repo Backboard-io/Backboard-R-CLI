@@ -17,9 +17,23 @@ export interface ToolPolicySnapshot {
 	computerUseEnabled: boolean;
 	browserUseEnabled: boolean;
 	skillDiscoveryEnabled: boolean;
+	/**
+	 * Expert mode, on the parent policy only. Implementation moves to the
+	 * expert model, so the parent loses the tools that would let it implement
+	 * inline and has to delegate through the Agent tool instead.
+	 */
+	expertModeEnabled?: boolean;
 }
 
 const SKILL_DISCOVERY_TOOLS = ["find_skill", "find_mcp"];
+
+/** Withheld from the parent while expert mode is on; sub-agents keep them. */
+export const EXPERT_EXECUTION_TOOLS: readonly string[] = [
+	"edit",
+	"write",
+	"apply_patch",
+	"execute",
+];
 
 export class ToolPolicy {
 	private readonly allowedTools: string[];
@@ -33,6 +47,7 @@ export class ToolPolicy {
 		this.excludedToolNames = combineToolExclusions(
 			snapshot.excludedTools,
 			snapshot.modelExcludedTools ?? [],
+			snapshot.expertModeEnabled ? EXPERT_EXECUTION_TOOLS : [],
 		);
 	}
 

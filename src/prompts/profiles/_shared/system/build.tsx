@@ -51,6 +51,7 @@ export function buildSystemPromptWith(
 		deps.getSystemPromptFragment(layout.base, promptContext),
 		options.computerUseEnabled ? deps.computer.prompt : "",
 		options.browserUseEnabled ? deps.browser.prompt : "",
+		options.expertModePrompt,
 		options.startupEnvironmentPrompt,
 		options.skillDiscoveryEnabled ? SKILL_DISCOVERY_GUIDANCE : "",
 		buildSkillCatalogPrompt(options.skillCatalog),

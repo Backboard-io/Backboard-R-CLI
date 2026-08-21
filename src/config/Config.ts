@@ -6,6 +6,7 @@ import {
 	NO_CREDENTIALS_MESSAGE,
 	resolveAuth,
 } from "./auth.ts";
+import type { ExpertConfig } from "./BackboardConfigTypes.ts";
 import { readBackboardConfig, saveBackboardConfig } from "./backboardConfig.ts";
 import {
 	DEFAULTS,
@@ -79,6 +80,10 @@ export class Config {
 	private verboseEnabled = true;
 	private readonly currentMemoryProfile: MemoryProfile;
 	private currentThinking: ThinkingIntent | null | undefined;
+	private expertEnabled = false;
+	private expertModelRef: ModelRef | null = null;
+	private expertModelProfile: ModelProfile | null = null;
+	private expertThinking: ThinkingIntent | null | undefined;
 	private readonly currentFinalVerificationNudge: boolean;
 	private readonly excludedToolNames: string[];
 	private readonly persistedConfigHomeDir: string | undefined;
@@ -137,6 +142,13 @@ export class Config {
 				: parseThinking(this.flags.thinking);
 		this.currentFinalVerificationNudge =
 			this.flags.finalVerification ?? DEFAULTS.finalVerificationNudge;
+		const expert = persistedConfig.expert;
+		this.expertEnabled = expert?.enabled ?? false;
+		this.expertModelRef = expert?.model ?? null;
+		this.expertModelProfile = expert?.model
+			? resolveModelProfile(expert.model)
+			: null;
+		this.expertThinking = expert?.thinking;
 		this.notifyEnabled = persistedConfig.notify ?? false;
 		this.verboseEnabled = persistedConfig.verbose ?? true;
 		this.excludedToolNames = parseExcludedTools(this.flags.excludedTools).map(
@@ -189,15 +201,37 @@ export class Config {
 		return this.toolPolicy.isRuntimeAllowed(name);
 	}
 
+	/** Runtime gate for tools a sub-agent runs; expert mode never narrows it. */
+	isDelegatedToolEnabled(name: string): boolean {
+		return this.delegatedToolPolicy.isRuntimeAllowed(name);
+	}
+
 	get toolPolicy(): ToolPolicy {
+		return this.buildToolPolicy(this.isExpertModeEnabled);
+	}
+
+	/**
+	 * The sub-agent's policy: it holds the expert model and does implement, so
+	 * it keeps the implementation tools and takes its allow/deny lists from the
+	 * execution model's profile rather than the planner's.
+	 */
+	get delegatedToolPolicy(): ToolPolicy {
+		return this.buildToolPolicy(false, this.executionModelProfile);
+	}
+
+	private buildToolPolicy(
+		expertModeEnabled: boolean,
+		modelProfile: ModelProfile = this.currentModelProfile,
+	): ToolPolicy {
 		return new ToolPolicy({
 			profileTools: this.profile.tools,
-			modelTools: this.currentModelProfile.tools,
+			modelTools: modelProfile.tools,
 			excludedTools: this.excludedToolNames,
-			modelExcludedTools: this.currentModelProfile.excludedTools,
+			modelExcludedTools: modelProfile.excludedTools,
 			computerUseEnabled: this.computerUseEnabled,
 			browserUseEnabled: this.browserUseEnabled,
 			skillDiscoveryEnabled: this.skillDiscoveryEnabled,
+			expertModeEnabled,
 		});
 	}
 
@@ -278,6 +312,51 @@ export class Config {
 		this.currentThinking = thinking;
 	}
 
+	/** On only once a model is picked — expert mode with no model is a no-op. */
+	get isExpertModeEnabled(): boolean {
+		return this.expertEnabled && this.expertModelRef !== null;
+	}
+
+	get expertModel(): ModelRef | null {
+		return this.expertModelRef;
+	}
+
+	/** The model that implements: the expert pick, else the `/model` selection. */
+	get executionModel(): ModelRef {
+		return this.isExpertModeEnabled && this.expertModelRef
+			? this.expertModelRef
+			: this.currentModel;
+	}
+
+	/** The profile of whichever model implements — it decides that model's tools. */
+	get executionModelProfile(): ModelProfile {
+		return this.isExpertModeEnabled && this.expertModelProfile
+			? this.expertModelProfile
+			: this.currentModelProfile;
+	}
+
+	get executionThinking(): ThinkingIntent | null | undefined {
+		return this.isExpertModeEnabled
+			? this.expertThinking
+			: this.currentThinking;
+	}
+
+	/** Omitting `model` keeps the remembered pick, so off/on needs no re-pick. */
+	setExpertMode(next: {
+		enabled: boolean;
+		model?: ModelRef | null;
+		thinking?: ThinkingIntent | null | undefined;
+	}): void {
+		this.expertEnabled = next.enabled;
+		if (next.model !== undefined) {
+			this.expertModelRef = next.model;
+			this.expertModelProfile = next.model
+				? resolveModelProfile(next.model)
+				: null;
+		}
+		if ("thinking" in next) this.expertThinking = next.thinking;
+	}
+
 	async saveRuntimeSelection(): Promise<void> {
 		const existing = readBackboardConfig(this.persistedConfigHomeDir);
 		await saveBackboardConfig(
@@ -294,6 +373,19 @@ export class Config {
 					? { memoryProfile: this.currentMemoryProfile }
 					: {}),
 			},
+			this.persistedConfigHomeDir,
+		);
+	}
+
+	async saveExpertPreference(): Promise<void> {
+		const existing = readBackboardConfig(this.persistedConfigHomeDir);
+		const expert: ExpertConfig = { enabled: this.expertEnabled };
+		if (this.expertModelRef) expert.model = this.expertModelRef;
+		if (this.expertThinking !== undefined) {
+			expert.thinking = this.expertThinking;
+		}
+		await saveBackboardConfig(
+			{ ...existing, expert },
 			this.persistedConfigHomeDir,
 		);
 	}

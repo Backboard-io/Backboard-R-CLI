@@ -129,6 +129,23 @@ describe("parseAgentFromMarkdown", () => {
 		expect(result.warning).toContain("invalid model");
 	});
 
+	it.each([
+		["number", "model: 123"],
+		["null", "model: null"],
+		["empty string", 'model: ""'],
+		["mapping", "model:\n  provider: anthropic"],
+		["sequence", "model: [anthropic/claude-opus-5]"],
+	])("rejects an explicit non-string model value (%s)", (_label, line) => {
+		const result = parseAgentFromMarkdown(
+			`---\ndescription: d\n${line}\n---\nbody`,
+			"a",
+			"/a.md",
+			"project",
+		);
+		expect(result.agent).toBeUndefined();
+		expect(result.warning).toContain("invalid model");
+	});
+
 	it("trims whitespace around qualified model parts", () => {
 		const result = parseAgentFromMarkdown(
 			'---\ndescription: d\nmodel: " anthropic / claude-opus-5 "\n---\nbody',

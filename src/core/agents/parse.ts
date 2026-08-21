@@ -70,7 +70,7 @@ export function parseAgentFromMarkdown(
 	const model = parseModelRef(data.model);
 	if (model === INVALID) {
 		return skip(
-			`invalid model '${stringValue(data.model)}' — use a model name, 'provider/model' with both parts set, or 'inherit'.`,
+			`invalid model '${describeValue(data.model)}' — use a model name, 'provider/model' with both parts set, or 'inherit'.`,
 		);
 	}
 
@@ -112,8 +112,13 @@ const INVALID = Symbol("invalid");
 type Invalid = typeof INVALID;
 
 function parseModelRef(value: unknown): ModelRef | undefined | Invalid {
+	// Only an absent field and the literal "inherit" mean "no override": an
+	// explicit non-string (or blank) value is a typo, not a request to fall
+	// back to the session model, so it must warn instead of loading silently.
+	if (value === undefined) return undefined;
 	const raw = stringValue(value);
-	if (!raw || raw === "inherit") return undefined;
+	if (!raw) return INVALID;
+	if (raw === "inherit") return undefined;
 	const parsed = parseModel(raw);
 	const provider = parsed.provider.trim();
 	const model = parsed.model.trim();
@@ -154,6 +159,16 @@ function boolValue(value: unknown): boolean | undefined | Invalid {
 
 function stringValue(value: unknown): string | null {
 	return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+/** Renders any frontmatter value for a warning, including non-strings. */
+function describeValue(value: unknown): string {
+	if (typeof value === "string") return value;
+	try {
+		return JSON.stringify(value) ?? String(value);
+	} catch {
+		return String(value);
+	}
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

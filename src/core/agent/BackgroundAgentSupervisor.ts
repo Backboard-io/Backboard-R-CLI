@@ -56,6 +56,15 @@ export class BackgroundAgentSupervisor {
 		this.notifier = notifier;
 	}
 
+	/**
+	 * Drops the notifier for good. `finish` removes a run before reporting, so
+	 * `cancelAll` cannot reach one that already completed: shutdown has to
+	 * close this door too, or a late report starts a turn mid-teardown.
+	 */
+	disableNotifier(): void {
+		this.notifier = undefined;
+	}
+
 	get active(): BackgroundRunSnapshot[] {
 		return [...this.runs.values()]
 			.map((run) => run.snapshot)

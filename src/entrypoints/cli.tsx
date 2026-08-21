@@ -389,7 +389,13 @@ async function main(): Promise<void> {
 	sweepStaleClipboardImages();
 	const flush = async (): Promise<void> => {
 		try {
+			// A run that finished between the UI exiting and this call is already
+			// out of the supervisor's map, so cancelAll cannot reach the report
+			// turn it started: close the notifier and cancel the controller too,
+			// then let dispose() wait for whatever turn is still unwinding.
+			backgroundSupervisor.disableNotifier();
 			backgroundSupervisor.cancelAll();
+			controller.cancel({ clearQueue: true });
 			await controller.dispose();
 			await lsp.shutdown();
 			await mcpManager.close();

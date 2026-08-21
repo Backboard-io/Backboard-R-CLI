@@ -208,8 +208,10 @@ export class CheckpointStore implements CheckpointRecorder {
 	private readonly turnIndex = new Map<string, TurnJournalRecord>();
 	/** turnIds with a finalize record; kept in step with `records`. */
 	private readonly finalizedTurns = new Set<string>();
-	/** turnIds that captured at least one pre/skip entry. */
-	private readonly turnsWithEntries = new Set<string>();
+	/** turnId -> count of its pre/skip entries that a revoke has not dropped. */
+	private readonly turnEntryCounts = new Map<string, number>();
+	/** `seq`s of pre/skip records neutralized by a `revoke` record. */
+	private readonly revokedSeqs = new Set<number>();
 	/** pathKey -> newest post record; kept in step with `records`. */
 	private readonly latestPostByPath = new Map<string, PostImageJournalRecord>();
 	private shellIndex: WorkspaceIndex | null = null;
@@ -298,8 +300,9 @@ export class CheckpointStore implements CheckpointRecorder {
 		const stats = await lstatOrNull(path);
 		if (revokedMidCapture()) return;
 		this.ensureTurn(turnId);
+		let entrySeq: number;
 		if (!stats) {
-			this.append({
+			entrySeq = this.append({
 				type: "pre",
 				turnId,
 				toolCallId,
@@ -311,7 +314,7 @@ export class CheckpointStore implements CheckpointRecorder {
 					: {}),
 			});
 		} else if (!stats.isFile()) {
-			this.append({
+			entrySeq = this.append({
 				type: "pre",
 				turnId,
 				toolCallId,
@@ -328,7 +331,7 @@ export class CheckpointStore implements CheckpointRecorder {
 						"not be rolled back; aborting before any modification",
 				);
 			}
-			this.append({
+			entrySeq = this.append({
 				type: "skip",
 				turnId,
 				toolCallId,
@@ -340,7 +343,7 @@ export class CheckpointStore implements CheckpointRecorder {
 			const content = await readFile(path);
 			const hash = await this.blobs.put(content);
 			if (revokedMidCapture()) return;
-			this.append({
+			entrySeq = this.append({
 				type: "pre",
 				turnId,
 				toolCallId,
@@ -355,6 +358,15 @@ export class CheckpointStore implements CheckpointRecorder {
 		// Write-ahead durability: the journal entry (and blob) must be on disk
 		// before the tool mutates the file. Flush errors abort the tool call.
 		await this.journal.flush();
+		// Revocation can still land while that flush is in flight. The entry is
+		// already durable and its post-image will now be suppressed, so drop it
+		// with a compensating record rather than leave an orphan pre-image the
+		// turn's /undo would use to revert the background run's write.
+		if (ctx.mayJournal?.() === false) {
+			this.append({ type: "revoke", turnId, ref: entrySeq, path });
+			await this.journal.flush();
+			if (opts?.requireRevertible) throw revokedCaptureError(path);
+		}
 	}
 
 	/**
@@ -398,6 +410,7 @@ export class CheckpointStore implements CheckpointRecorder {
 		const byPath = new Map<string, PreImageJournalRecord>();
 		for (const record of this.records) {
 			if (record.type !== "pre" || record.toolCallId !== toolCallId) continue;
+			if (this.isRevoked(record)) continue;
 			const key = this.pathKey(record.path);
 			if (!byPath.has(key)) byPath.set(key, record);
 		}
@@ -642,6 +655,7 @@ export class CheckpointStore implements CheckpointRecorder {
 				record.type !== "post"
 			)
 				continue;
+			if (this.isRevoked(record)) continue;
 			const acc = byTurn.get(record.turnId);
 			if (!acc) continue;
 			const key = this.pathKey(record.path);
@@ -994,17 +1008,31 @@ export class CheckpointStore implements CheckpointRecorder {
 		} else if (record.type === "finalize") {
 			this.finalizedTurns.add(record.turnId);
 		} else if (record.type === "pre" || record.type === "skip") {
-			this.turnsWithEntries.add(record.turnId);
+			this.bumpTurnEntries(record.turnId, 1);
 		} else if (record.type === "post") {
 			this.latestPostByPath.set(this.pathKey(record.path), record);
+		} else if (record.type === "revoke") {
+			this.revokedSeqs.add(record.ref);
+			this.bumpTurnEntries(record.turnId, -1);
 		}
 	}
 
+	private bumpTurnEntries(turnId: string, delta: number): void {
+		const next = (this.turnEntryCounts.get(turnId) ?? 0) + delta;
+		this.turnEntryCounts.set(turnId, Math.max(0, next));
+	}
+
+	/** True if a `revoke` record dropped this pre/skip entry. */
+	private isRevoked(record: JournalRecord): boolean {
+		return this.revokedSeqs.has(record.seq);
+	}
+
+	/** Returns the `seq` stamped on the record, so it can be revoked later. */
 	private append<T extends JournalRecord["type"]>(
 		record: Omit<Extract<JournalRecord, { type: T }>, "seq" | "ts"> & {
 			type: T;
 		},
-	): void {
+	): number {
 		const full = {
 			...record,
 			seq: this.seq++,
@@ -1013,6 +1041,7 @@ export class CheckpointStore implements CheckpointRecorder {
 		this.records.push(full);
 		this.indexRecord(full);
 		this.journal.write(full);
+		return full.seq;
 	}
 
 	private ensureTurn(turnId: string): void {
@@ -1023,7 +1052,7 @@ export class CheckpointStore implements CheckpointRecorder {
 	private finalizeTurn(turnId: string, status: "ok" | "cancelled"): void {
 		if (!this.turnRecordFor(turnId)) return;
 		if (this.finalizedTurns.has(turnId)) return;
-		const hasEntries = this.turnsWithEntries.has(turnId);
+		const hasEntries = (this.turnEntryCounts.get(turnId) ?? 0) > 0;
 		this.append({
 			type: "finalize",
 			turnId,
@@ -1056,7 +1085,8 @@ export class CheckpointStore implements CheckpointRecorder {
 			(record) =>
 				record.seq > seq &&
 				((record.type === "pre" && record.tool !== REDO_TOOL) ||
-					record.type === "skip"),
+					record.type === "skip") &&
+				!this.isRevoked(record),
 		);
 	}
 
@@ -1074,6 +1104,7 @@ export class CheckpointStore implements CheckpointRecorder {
 		>();
 		for (const record of this.records) {
 			if (record.type !== "pre" && record.type !== "skip") continue;
+			if (this.isRevoked(record)) continue;
 			if (target.kind === "redo-point") {
 				if (record.turnId !== target.turnId) continue;
 			} else {

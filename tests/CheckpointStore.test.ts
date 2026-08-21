@@ -705,6 +705,61 @@ describe("revocableRecorder", () => {
 		expect(store.listCheckpoints()).toHaveLength(0);
 	});
 
+	it("drops a capture revoked while its journal flush was pending", async () => {
+		const { bus, store } = makeStore();
+		const file = join(work, "f.txt");
+		await writeFile(file, "v0", "utf8");
+
+		startTurn(bus, "t1");
+		const { recorder, revoke } = revocableRecorder(store.scopedToTurn("t1"));
+		// Revocation lands after the last in-capture check, while the journal
+		// flush is still in flight: the pre-image is already durable but the
+		// post-image will be suppressed.
+		let checks = 0;
+		const racing = {
+			...ctx("t1", "c1"),
+			mayJournal: () => {
+				if (++checks === 2) revoke();
+				return true;
+			},
+		};
+		await recorder.recordPreImage(file, racing, { tool: "Edit" });
+		await writeFile(file, "v1", "utf8");
+		await recorder.recordPostImage(file, racing, Buffer.from("v1"));
+		endTurn(bus, "t1");
+
+		// The background run's write must not be revertible through the
+		// foreground turn's checkpoint.
+		expect(store.listCheckpoints()).toHaveLength(0);
+		expect(store.undoTarget()).toBeNull();
+	});
+
+	it("rejects a requireRevertible capture revoked during its flush", async () => {
+		const { bus, store } = makeStore();
+		const file = join(work, "f.txt");
+		await writeFile(file, "v0", "utf8");
+
+		startTurn(bus, "t1");
+		const { recorder, revoke } = revocableRecorder(store.scopedToTurn("t1"));
+		let checks = 0;
+		const racing = {
+			...ctx("t1", "c1"),
+			mayJournal: () => {
+				if (++checks === 2) revoke();
+				return true;
+			},
+		};
+
+		await expect(
+			recorder.recordPreImage(file, racing, {
+				tool: "ApplyPatch",
+				requireRevertible: true,
+			}),
+		).rejects.toThrow(/rolled back/);
+		endTurn(bus, "t1");
+		expect(store.listCheckpoints()).toHaveLength(0);
+	});
+
 	it("revokes recorders a nested run re-scoped from it", async () => {
 		const { bus, store } = makeStore();
 		const file = join(work, "f.txt");

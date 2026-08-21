@@ -22,6 +22,7 @@ import type {
 import { initialState } from "../src/state/AppState.ts";
 import { reduce } from "../src/state/Store.ts";
 import { AgentTool } from "../src/tools/AgentTool.tsx";
+import { startNewSession } from "../src/ui/utils/startNewSession.ts";
 
 const env = { apiKey: "k", apiUrl: "https://example.test/api" };
 const PERMISSIONS: PermissionContext = {
@@ -400,5 +401,222 @@ describe("background agent end-to-end", () => {
 				.map((message) => (message.role === "tool" ? "" : message.text))
 				.join("\n"),
 		).not.toContain("stale report processed");
+	});
+	it("stops background work before replacement storage is activated", async () => {
+		const config = new Config({ env, argv: [] });
+		const bus = new EventBus();
+		const session = new Session("sess_bg5");
+		const supervisor = new BackgroundAgentSupervisor(bus);
+
+		let released!: () => void;
+		const agentWork = new Promise<void>((resolve) => {
+			released = resolve;
+		});
+
+		const agentTool = new AgentTool({
+			runner: {
+				run: async () => {
+					await agentWork;
+					return {
+						report: "report for the outgoing session",
+						status: "completed" as const,
+						usage: {},
+						toolRounds: 1,
+					};
+				},
+			},
+			createRLMLoop: () => ({
+				run: async () => {
+					throw new Error("unused");
+				},
+			}),
+			getCatalog: () => new AgentCatalog([WATCHER, ...BUILT_IN_AGENTS]),
+			maxDepth: 2,
+			maxConcurrent: 8,
+			supervisor,
+		});
+
+		const client = new ScriptedClient();
+		const controller = new AgentController({
+			config,
+			bus,
+			session,
+			registry: new ToolRegistry([agentTool]),
+			client: client as unknown as BackboardClient,
+			skillController: new SkillController({ cwd: config.cwd, bus }),
+			permissions: PERMISSIONS,
+			backgroundSupervisor: supervisor,
+		});
+		const reports: string[] = [];
+		supervisor.setNotifier((report) => {
+			reports.push(report);
+			void controller.submit(report, {
+				emitUserMessage: false,
+				priority: "later",
+			});
+		});
+
+		await controller.submit("start it");
+		expect(supervisor.active).toHaveLength(1);
+
+		// The run finishes inside the activation window, while checkpoint and
+		// event-log roots are being rotated onto the replacement session.
+		let rotated = false;
+		await startNewSession({
+			detach: () => controller.beginSessionReplacement(),
+			activate: async () => {
+				released();
+				await sleep(50);
+				rotated = true;
+			},
+			resetThread: () => controller.newThread(),
+		});
+		await sleep(50);
+
+		expect(rotated).toBe(true);
+		expect(supervisor.active).toHaveLength(0);
+		expect(reports).toEqual([]);
+		// No stale turn ran against the replacement session.
+		expect(client.prompts).toEqual(["start it"]);
+	});
+
+	it("caps the shutdown wait when a turn ignores its abort signal", async () => {
+		const config = new Config({ env, argv: [] });
+		const bus = new EventBus();
+		const session = new Session("sess_bg7");
+
+		// A stream that never returns and never checks its signal.
+		const client = new (class extends ScriptedClient {
+			override async *runMessage(): AsyncIterable<ProviderEvent> {
+				yield { kind: "thread", threadId: "thr_1" };
+				await new Promise<void>(() => {});
+			}
+		})();
+		const controller = new AgentController({
+			config,
+			bus,
+			session,
+			registry: new ToolRegistry([]),
+			client: client as unknown as BackboardClient,
+			skillController: new SkillController({ cwd: config.cwd, bus }),
+			permissions: PERMISSIONS,
+		});
+
+		void controller.submit("wedge the turn");
+		await sleep(20);
+		expect(controller.hasActiveWork).toBe(true);
+
+		controller.cancel({ clearQueue: true });
+		const started = Date.now();
+		await controller.settle(50);
+
+		expect(Date.now() - started).toBeLessThan(1_000);
+		expect(controller.hasActiveWork).toBe(true);
+	});
+
+	it("cancels and awaits a report turn already underway when disposing", async () => {
+		const config = new Config({ env, argv: [] });
+		const bus = new EventBus();
+		const session = new Session("sess_bg6");
+		const supervisor = new BackgroundAgentSupervisor(bus);
+
+		let released!: () => void;
+		const agentWork = new Promise<void>((resolve) => {
+			released = resolve;
+		});
+
+		const agentTool = new AgentTool({
+			runner: {
+				run: async () => {
+					await agentWork;
+					return {
+						report: "late report",
+						status: "completed" as const,
+						usage: {},
+						toolRounds: 1,
+					};
+				},
+			},
+			createRLMLoop: () => ({
+				run: async () => {
+					throw new Error("unused");
+				},
+			}),
+			getCatalog: () => new AgentCatalog([WATCHER, ...BUILT_IN_AGENTS]),
+			maxDepth: 2,
+			maxConcurrent: 8,
+			supervisor,
+		});
+
+		let releaseReport!: () => void;
+		const reportStream = new Promise<void>((resolve) => {
+			releaseReport = resolve;
+		});
+		const client = new (class extends ScriptedClient {
+			private turns = 0;
+			override async *runMessage(
+				req: SendMessageRequest,
+				options?: { signal?: AbortSignal },
+			): AsyncIterable<ProviderEvent> {
+				this.prompts.push(req.content ?? "");
+				this.turns++;
+				yield { kind: "thread", threadId: "thr_1" };
+				if (this.turns === 1) {
+					yield {
+						kind: "requires_action",
+						runId: "run_1",
+						calls: [
+							{
+								id: "call_1",
+								name: "agent",
+								input: { subagent_type: "watcher", prompt: "run the checks" },
+							},
+						],
+					};
+					return;
+				}
+				await reportStream;
+				if (options?.signal?.aborted) throw new AbortError();
+				yield { kind: "assistant_delta", text: "late report processed" };
+				yield { kind: "completed" };
+			}
+		})();
+		const controller = new AgentController({
+			config,
+			bus,
+			session,
+			registry: new ToolRegistry([agentTool]),
+			client: client as unknown as BackboardClient,
+			skillController: new SkillController({ cwd: config.cwd, bus }),
+			permissions: PERMISSIONS,
+			backgroundSupervisor: supervisor,
+		});
+		supervisor.setNotifier((report) => {
+			void controller.submit(report, {
+				emitUserMessage: false,
+				priority: "later",
+			});
+		});
+
+		await controller.submit("start it");
+		// The run finishes after the UI exits but before shutdown reaches the
+		// supervisor: its report turn is already underway.
+		released();
+		await sleep(50);
+		expect(client.prompts).toHaveLength(2);
+
+		const disposed = controller.dispose();
+		releaseReport();
+		await disposed;
+
+		// Shutdown must not return while a turn can still touch tools, logs,
+		// or checkpoints.
+		expect(controller.hasActiveWork).toBe(false);
+		expect(
+			session
+				.getMessages()
+				.map((message) => (message.role === "tool" ? "" : message.text))
+				.join("\n"),
+		).not.toContain("late report processed");
 	});
 });

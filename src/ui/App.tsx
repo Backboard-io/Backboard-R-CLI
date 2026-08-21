@@ -1034,6 +1034,10 @@ export function App({
 						"A turn started while the session was loading. Cancel it before resuming.",
 					);
 				}
+				// Both branches below rotate the durable session's storage; stop
+				// work bound to the outgoing one first, or a background run
+				// finishing mid-rotation reports into the replacement session.
+				controller.beginSessionReplacement();
 				if (hydratedThread.metadata_?.[BYOK_THREAD_METADATA_KEY] === true) {
 					const sessionId =
 						hydratedThread.metadata_?.[BYOK_SESSION_ID_METADATA_KEY];
@@ -1459,6 +1463,7 @@ export function App({
 					setLoadingLabel("Starting session");
 					setMode("loading");
 					void startNewSession({
+						detach: () => controller.beginSessionReplacement(),
 						activate: onNewSession,
 						resetThread: () => agent.newThread(),
 					})

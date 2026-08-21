@@ -147,6 +147,36 @@ describe("BackgroundAgentSupervisor", () => {
 		expect(supervisor.active).toHaveLength(0);
 	});
 
+	it("stays silent once the notifier is disabled for shutdown", async () => {
+		const supervisor = new BackgroundAgentSupervisor(new EventBus());
+		const reports: string[] = [];
+		supervisor.setNotifier((report) => reports.push(report));
+
+		let release!: () => void;
+		const work = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		supervisor.launch({
+			definition: BACKGROUND_AGENT,
+			prompt: "finishes during teardown",
+			run: async () => {
+				await work;
+				return {
+					report: "too late",
+					status: "completed" as const,
+					usage: {},
+					toolRounds: 1,
+				};
+			},
+		});
+
+		supervisor.disableNotifier();
+		release();
+		await sleep(60);
+
+		expect(reports).toEqual([]);
+	});
+
 	it("still reports when the run throws", async () => {
 		const supervisor = new BackgroundAgentSupervisor(new EventBus());
 		const reports: string[] = [];

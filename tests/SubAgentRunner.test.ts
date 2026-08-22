@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { ModelRef } from "../src/config/defaults.ts";
 import { AgentTraceContext } from "../src/core/agent/AgentTraceStore.ts";
 import {
 	SubAgentRunner,
@@ -110,6 +111,65 @@ function runnerWith(client: BackboardClient, tools: Tool[]): SubAgentRunner {
 		toolFactory: () => tools,
 	});
 }
+
+describe("SubAgentRunner model override", () => {
+	it("resolves thinking and tool policy from the definition's model", async () => {
+		const pinned = { provider: "moonshot", model: "kimi-k3" };
+		const thinkingModels: ModelRef[] = [];
+		const toolGateModels: ModelRef[] = [];
+		const runner = new SubAgentRunner({
+			client: new CompletingClient(),
+			getModel: () => TEST_MODEL,
+			memory: "off",
+			memoryProfile: "code",
+			getThinking: async (model) => {
+				thinkingModels.push(model);
+				return undefined;
+			},
+			toolFactory: () => [new TestTool({ name: "Read", readOnly: true })],
+			isToolEnabled: (_name, model) => {
+				toolGateModels.push(model);
+				return true;
+			},
+		});
+
+		await runner.run({
+			prompt: "work",
+			depth: 1,
+			definition: { ...TEST_DEFINITION, model: pinned },
+			parentCwd: process.cwd(),
+			parentSignal: new AbortController().signal,
+		});
+
+		expect(thinkingModels).toEqual([pinned]);
+		expect(toolGateModels.every((model) => model === pinned)).toBe(true);
+	});
+
+	it("falls back to the session model when the definition pins none", async () => {
+		const thinkingModels: ModelRef[] = [];
+		const runner = new SubAgentRunner({
+			client: new CompletingClient(),
+			getModel: () => TEST_MODEL,
+			memory: "off",
+			memoryProfile: "code",
+			getThinking: async (model) => {
+				thinkingModels.push(model);
+				return undefined;
+			},
+			toolFactory: () => [],
+		});
+
+		await runner.run({
+			prompt: "work",
+			depth: 1,
+			definition: TEST_DEFINITION,
+			parentCwd: process.cwd(),
+			parentSignal: new AbortController().signal,
+		});
+
+		expect(thinkingModels).toEqual([TEST_MODEL]);
+	});
+});
 
 describe("SubAgentRunner", () => {
 	it("returns only the sub-agent's final report and aggregates usage", async () => {

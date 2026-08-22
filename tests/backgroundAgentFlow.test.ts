@@ -480,6 +480,49 @@ describe("background agent end-to-end", () => {
 		expect(client.prompts).toEqual(["start it"]);
 	});
 
+	it("waits for an outgoing turn before replacement storage is activated", async () => {
+		const config = new Config({ env, argv: [] });
+		const bus = new EventBus();
+		const session = new Session("sess_bg8");
+		const order: string[] = [];
+
+		// Commits regardless of its signal: cancellation only asks it to stop,
+		// so rotating storage now would let it write against the new roots.
+		const client = new (class extends ScriptedClient {
+			override async *runMessage(): AsyncIterable<ProviderEvent> {
+				yield { kind: "thread", threadId: "thr_1" };
+				await sleep(60);
+				order.push("turn committed");
+				yield { kind: "assistant_delta", text: "done" };
+				yield { kind: "completed" };
+			}
+		})();
+
+		const controller = new AgentController({
+			config,
+			bus,
+			session,
+			registry: new ToolRegistry([]),
+			client: client as unknown as BackboardClient,
+			skillController: new SkillController({ cwd: config.cwd, bus }),
+			permissions: PERMISSIONS,
+		});
+
+		void controller.submit("start a stubborn turn");
+		await sleep(10);
+		expect(controller.hasActiveWork).toBe(true);
+
+		await startNewSession({
+			detach: () => controller.beginSessionReplacement(),
+			activate: async () => {
+				order.push("activate");
+			},
+			resetThread: () => controller.newThread(),
+		});
+
+		expect(order).toEqual(["turn committed", "activate"]);
+	});
+
 	it("caps the shutdown wait when a turn ignores its abort signal", async () => {
 		const config = new Config({ env, argv: [] });
 		const bus = new EventBus();

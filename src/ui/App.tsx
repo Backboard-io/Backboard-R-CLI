@@ -1084,7 +1084,7 @@ export function App({
 				// Both branches below rotate the durable session's storage; stop
 				// work bound to the outgoing one first, or a background run
 				// finishing mid-rotation reports into the replacement session.
-				controller.beginSessionReplacement();
+				await controller.beginSessionReplacement();
 				if (hydratedThread.metadata_?.[BYOK_THREAD_METADATA_KEY] === true) {
 					const sessionId =
 						hydratedThread.metadata_?.[BYOK_SESSION_ID_METADATA_KEY];

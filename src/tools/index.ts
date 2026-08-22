@@ -1,3 +1,4 @@
+import type { ModelRef } from "../config/defaults.ts";
 import {
 	createRuntimeThinkingResolver,
 	resolveRuntimeThinking,
@@ -76,9 +77,11 @@ function buildAgentTool(deps: DefaultToolDeps, base: Tool[]): AgentTool {
 
 	// Sub-agents are where implementation happens, so they run on the execution
 	// model and against the delegated policy — expert mode narrows the parent,
-	// never the worker that has to do the work.
-	const executionView = () => ({
-		model: deps.config.executionModel,
+	// never the worker that has to do the work. An agent that pins `model:`
+	// moves both: the runner sends its turns there, so its thinking metadata
+	// and tool profile must be resolved from that model, not the session's.
+	const executionView = (model: ModelRef) => ({
+		model,
 		thinkingIntent: deps.config.executionThinking,
 	});
 
@@ -87,19 +90,28 @@ function buildAgentTool(deps: DefaultToolDeps, base: Tool[]): AgentTool {
 		getModel: () => deps.config.executionModel,
 		memory: deps.config.memory,
 		memoryProfile: deps.config.memoryProfile,
-		getThinking: () => resolveRuntimeThinking(executionView(), deps.client),
-		getThinkingResolver: () =>
-			createRuntimeThinkingResolver(executionView(), deps.client),
-		toolFactory: ({ definition }) => {
+		getThinking: (model, signal) =>
+			resolveRuntimeThinking(executionView(model), deps.client, undefined, {
+				signal,
+			}),
+		getThinkingResolver: (model, signal) =>
+			createRuntimeThinkingResolver(executionView(model), deps.client, {
+				signal,
+			}),
+		toolFactory: ({ definition, model }) => {
 			const registry = new ToolRegistry([...(deps.getTools?.() ?? base)]);
 			return selectDelegatableTools({
 				definition,
-				candidates: deps.config.delegatedToolPolicy.visibleTools(registry),
+				candidates: deps.config
+					.delegatedToolPolicyFor(model)
+					.visibleTools(registry),
 				agentTool: holder.tool,
-				isToolEnabled: (name) => deps.config.isDelegatedToolEnabled(name),
+				isToolEnabled: (name) =>
+					deps.config.isDelegatedToolEnabled(name, model),
 			});
 		},
-		isToolEnabled: (name) => deps.config.isDelegatedToolEnabled(name),
+		isToolEnabled: (name, model) =>
+			deps.config.isDelegatedToolEnabled(name, model),
 		hookController: deps.hookController,
 		lsp: deps.lsp,
 		checkpoints: deps.checkpoints,

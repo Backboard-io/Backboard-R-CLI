@@ -6,8 +6,12 @@ export class RunTimeoutError extends Error {
 }
 
 export interface RunBudgetOptions {
-	/** False keeps the run alive past the deadline; await `expiry` instead. */
-	abortOnExpiry?: boolean;
+	/**
+	 * False keeps the run alive past the deadline; await `expiry` instead. A
+	 * function is consulted when the deadline fires, for a run whose waiter
+	 * may have gone away (moved to the background) since it started.
+	 */
+	abortOnExpiry?: boolean | (() => boolean);
 }
 
 /**
@@ -19,7 +23,7 @@ export class RunBudget {
 	private readonly timeout: ReturnType<typeof setTimeout> | null = null;
 	private readonly abortFromParent: () => void;
 	private readonly deadlineMs: number;
-	private readonly abortOnExpiry: boolean;
+	private readonly abortOnExpiry: () => boolean;
 	private signalExpiry!: () => void;
 	private expired = false;
 	private detached = false;
@@ -32,7 +36,9 @@ export class RunBudget {
 		readonly timeoutMs?: number,
 		options: RunBudgetOptions = {},
 	) {
-		this.abortOnExpiry = options.abortOnExpiry ?? true;
+		const abortOnExpiry = options.abortOnExpiry ?? true;
+		this.abortOnExpiry =
+			typeof abortOnExpiry === "function" ? abortOnExpiry : () => abortOnExpiry;
 		this.expiry = new Promise<void>((resolve) => {
 			this.signalExpiry = resolve;
 		});
@@ -54,7 +60,7 @@ export class RunBudget {
 		if (timeoutMs !== undefined) {
 			this.timeout = setTimeout(() => {
 				this.expired = true;
-				if (this.abortOnExpiry) {
+				if (this.abortOnExpiry()) {
 					this.controller.abort(new RunTimeoutError(timeoutMs));
 				}
 				this.signalExpiry();

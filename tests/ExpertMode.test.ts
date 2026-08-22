@@ -153,6 +153,25 @@ describe("expert mode tool policy", () => {
 		expect(config.isDelegatedToolEnabled("apply_patch")).toBe(true);
 	});
 
+	it("resolves a custom agent's tools from the model it pins", async () => {
+		// The session is OpenAI, whose profile swaps edit/write for apply_patch.
+		// An agent that pins a Moonshot model sends its turns there, so it must
+		// get that model's tools rather than the session's.
+		const homeDir = await mkdtemp(path.join(os.tmpdir(), "cli-expert-"));
+		await saveBackboardConfig(
+			{ model: { provider: "openai", model: "gpt-5" } },
+			homeDir,
+		);
+		const config = new Config({ env, argv: [], homeDir });
+
+		expect(config.isDelegatedToolEnabled("apply_patch")).toBe(true);
+		expect(config.isDelegatedToolEnabled("apply_patch", KIMI)).toBe(false);
+		expect(config.isDelegatedToolEnabled("edit", KIMI)).toBe(true);
+		expect(config.delegatedToolPolicyFor(KIMI).isRuntimeAllowed("write")).toBe(
+			true,
+		);
+	});
+
 	it("only withholds what expert mode named", async () => {
 		const on = await configWith({ expert: { enabled: true, model: KIMI } });
 		const off = await configWith({ expert: { enabled: false, model: KIMI } });

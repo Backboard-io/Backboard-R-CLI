@@ -202,8 +202,8 @@ export class Config {
 	}
 
 	/** Runtime gate for tools a sub-agent runs; expert mode never narrows it. */
-	isDelegatedToolEnabled(name: string): boolean {
-		return this.delegatedToolPolicy.isRuntimeAllowed(name);
+	isDelegatedToolEnabled(name: string, model?: ModelRef): boolean {
+		return this.delegatedToolPolicyFor(model).isRuntimeAllowed(name);
 	}
 
 	get toolPolicy(): ToolPolicy {
@@ -211,12 +211,18 @@ export class Config {
 	}
 
 	/**
-	 * The sub-agent's policy: it holds the expert model and does implement, so
-	 * it keeps the implementation tools and takes its allow/deny lists from the
-	 * execution model's profile rather than the planner's.
+	 * The sub-agent's policy: it does implement, so it keeps the implementation
+	 * tools and takes its allow/deny lists from the profile of the model it
+	 * runs on rather than the planner's — the execution model by default, or
+	 * the one a custom agent pins with `model:`. A Moonshot agent spawned from
+	 * an OpenAI session must not inherit the OpenAI profile's
+	 * `apply_patch`-instead-of-`edit` shape.
 	 */
-	get delegatedToolPolicy(): ToolPolicy {
-		return this.buildToolPolicy(false, this.executionModelProfile);
+	delegatedToolPolicyFor(model?: ModelRef): ToolPolicy {
+		return this.buildToolPolicy(
+			false,
+			model ? resolveModelProfile(model) : this.executionModelProfile,
+		);
 	}
 
 	private buildToolPolicy(

@@ -280,7 +280,6 @@ export class AgentTool extends Tool<AgentToolInput, AgentToolOutput> {
 				: undefined;
 		// A background run's tool row and checkpoint are already committed.
 		const foreground = signal === ctx.signal;
-		const parentInBackground = ctx.inBackgroundChain === true;
 		const onDeadline = this.deadlineHandoff(run, foreground);
 
 		return this.deps.runner.run({
@@ -300,10 +299,10 @@ export class AgentTool extends Tool<AgentToolInput, AgentToolOutput> {
 				: {}),
 			parentPermissions: ctx.permissions,
 			trace: workerTrace,
-			parentInBackground,
 			// A run launched into the background, or already inside one, is the
 			// background chain from its children's point of view.
-			chainInBackground: !foreground || parentInBackground,
+			chainInBackground: !foreground,
+			...(ctx.backgroundChain ? { parentChain: ctx.backgroundChain } : {}),
 			...(onDeadline ? { onDeadline } : {}),
 		});
 	}

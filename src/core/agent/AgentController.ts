@@ -57,10 +57,11 @@ import type { BackgroundAgentSupervisor } from "./BackgroundAgentSupervisor.ts";
 import { Turn } from "./Turn.ts";
 
 /**
- * How long `dispose()` waits for a cancelled turn to unwind before shutting
- * down anyway. Bounded so an unresponsive tool cannot wedge exit.
+ * How long `dispose()` and a session replacement wait for a cancelled turn to
+ * unwind before proceeding anyway. Bounded so an unresponsive tool cannot
+ * wedge exit, /new or /sessions.
  */
-const SHUTDOWN_SETTLE_MS = 5_000;
+const CANCELLED_TURN_SETTLE_MS = 5_000;
 
 export interface AgentControllerDeps {
 	config: Config;
@@ -196,12 +197,25 @@ export class AgentController {
 	}
 
 	/**
-	 * Stops everything bound to the outgoing session. MUST run before the
-	 * durable session's checkpoint and event-log roots are rotated: a run that
-	 * finishes inside that activation window would otherwise start its report
-	 * turn — and execute its tools — against the replacement storage.
+	 * Stops everything bound to the outgoing session and waits for its turn to
+	 * unwind. MUST be awaited before the durable session's checkpoint and
+	 * event-log roots are rotated: a run that finishes inside that activation
+	 * window would otherwise start its report turn — and execute its tools —
+	 * against the replacement storage. Cancelling only signals, so a turn in an
+	 * abort-insensitive or already-committing tool needs the settle too.
+	 * Background runs are only signalled: their checkpoint access was revoked
+	 * at handoff, so nothing they do afterwards can reach either journal.
 	 */
-	beginSessionReplacement(): void {
+	async beginSessionReplacement(): Promise<void> {
+		this.signalSessionReplacement();
+		await this.settle(CANCELLED_TURN_SETTLE_MS);
+	}
+
+	/**
+	 * The cancellation half, for callers that run after activation and so have
+	 * nothing left to wait for.
+	 */
+	private signalSessionReplacement(): void {
 		// Cancel the runs first: a run cancelled here can never reach the
 		// notifier, and anything that already did is dropped with the queue.
 		this.deps.backgroundSupervisor?.cancelAll();
@@ -215,7 +229,9 @@ export class AgentController {
 	}): void {
 		// A just-finished background run may already have queued its report
 		// turn here; cancel it so it cannot land in the resumed conversation.
-		this.beginSessionReplacement();
+		// Storage has already rotated by this point, so there is nothing to
+		// await — `beginSessionReplacement` guarded that window.
+		this.signalSessionReplacement();
 		this.deps.session.hydrate(input);
 	}
 
@@ -224,7 +240,7 @@ export class AgentController {
 		// report can start one at any moment, and it would keep touching the
 		// tools, logs, and checkpoints being closed here.
 		this.cancel({ clearQueue: true });
-		await this.settle(SHUTDOWN_SETTLE_MS);
+		await this.settle(CANCELLED_TURN_SETTLE_MS);
 		// Pair SessionEnd with SessionStart: only fire it if the session started.
 		if (this.sessionHooksStarted) {
 			await this.runTerminalHook((signal) =>
@@ -699,7 +715,7 @@ export class AgentController {
 		// Background agents were spawned to serve the discarded conversation;
 		// letting them report into the new thread would reference context that
 		// no longer exists.
-		this.beginSessionReplacement();
+		this.signalSessionReplacement();
 		this.deps.session.reset();
 	}
 

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test";
+import type { RuntimeThinkingResolver } from "../src/config/thinkingRuntime.ts";
 import { BackgroundAgentSupervisor } from "../src/core/agent/BackgroundAgentSupervisor.ts";
 import { RunBudget } from "../src/core/agent/RunBudget.ts";
 import { SubAgentRunner } from "../src/core/agent/SubAgentRunner.ts";
@@ -195,7 +196,7 @@ describe("budgets inside a backgrounded chain", () => {
 			parentCwd: process.cwd(),
 			parentSignal: new AbortController().signal,
 			// Its spawner already moved to the background.
-			parentInBackground: true,
+			parentChain: { inBackground: true },
 		});
 
 		// Ran past its budget, finished, and reported to its parent normally.
@@ -213,7 +214,7 @@ describe("budgets inside a backgrounded chain", () => {
 			depth: 2,
 			parentCwd: process.cwd(),
 			parentSignal: new AbortController().signal,
-			parentInBackground: false,
+			parentChain: { inBackground: false },
 		});
 
 		expect(result.status).toBe("timed_out");
@@ -241,7 +242,7 @@ describe("budgets inside a backgrounded chain", () => {
 		const run = probe.execute.bind(probe);
 		let seen: boolean | undefined;
 		probe.execute = (input, toolCtx) => {
-			seen = toolCtx.inBackgroundChain;
+			seen = toolCtx.backgroundChain?.inBackground;
 			return run(input, toolCtx);
 		};
 
@@ -281,6 +282,206 @@ describe("budgets inside a backgrounded chain", () => {
 		});
 
 		expect(seen).toBe(true);
+	});
+});
+
+describe("handoff moves the live run into the background chain", () => {
+	it("passes the new value to tools that run after adoption", async () => {
+		const probe = new TestTool({ name: "Read", readOnly: true });
+		const run = probe.execute.bind(probe);
+		const seen: boolean[] = [];
+		probe.execute = (input, toolCtx) => {
+			seen.push(toolCtx.backgroundChain?.inBackground === true);
+			return run(input, toolCtx);
+		};
+
+		/** One tool round before the budget expires, one after the handoff. */
+		class ToolAcrossDeadline extends SlowClient {
+			private round = 0;
+			constructor() {
+				super(1);
+			}
+			override async *runMessage(): AsyncIterable<ProviderEvent> {
+				yield { kind: "thread", threadId: "t" };
+				yield {
+					kind: "requires_action",
+					runId: "r",
+					calls: [{ id: "c1", name: "Read", input: {} }],
+				};
+			}
+			override async *runToolOutputs(): AsyncIterable<ProviderEvent> {
+				this.round++;
+				if (this.round === 1) {
+					await sleep(120);
+					yield {
+						kind: "requires_action",
+						runId: "r",
+						calls: [{ id: "c2", name: "Read", input: {} }],
+					};
+					return;
+				}
+				yield { kind: "assistant_delta", text: "done" };
+				yield { kind: "completed" };
+			}
+		}
+
+		const runner = new SubAgentRunner({
+			client: new ToolAcrossDeadline(),
+			getModel: () => TEST_MODEL,
+			memory: "off",
+			memoryProfile: "code",
+			getThinking: async () => undefined,
+			toolFactory: () => [probe],
+		});
+
+		let continuation: Promise<unknown> | undefined;
+		const result = await runner.run({
+			prompt: "x",
+			definition: definition({ timeoutMs: 40 }),
+			depth: 1,
+			parentCwd: process.cwd(),
+			parentSignal: new AbortController().signal,
+			onDeadline: ({ continuation: pending }) => {
+				continuation = pending;
+				return { runId: "bg_test" };
+			},
+		});
+		expect(result.status).toBe("backgrounded");
+		await continuation;
+
+		// Budgets stop being enforced below a run moved to the background, so
+		// the tool call after adoption must observe that.
+		expect(seen).toEqual([false, true]);
+	});
+});
+
+describe("a handoff reaches runs below it through the parent chain", () => {
+	it("flips a child's chain state when its parent is handed off", () => {
+		// Stand-in for a parent run's live state object.
+		const parent = { inBackground: false };
+		let seen: boolean | undefined;
+		const probe = new TestTool({ name: "Read", readOnly: true });
+		const run = probe.execute.bind(probe);
+		probe.execute = (input, toolCtx) => {
+			seen = toolCtx.backgroundChain?.inBackground;
+			return run(input, toolCtx);
+		};
+
+		class ReadAfterParentHandoff extends SlowClient {
+			constructor() {
+				super(1);
+			}
+			override async *runMessage(): AsyncIterable<ProviderEvent> {
+				yield { kind: "thread", threadId: "t" };
+				// The parent is backgrounded while this child is mid-turn.
+				parent.inBackground = true;
+				yield {
+					kind: "requires_action",
+					runId: "r",
+					calls: [{ id: "c1", name: "Read", input: {} }],
+				};
+			}
+			override async *runToolOutputs(): AsyncIterable<ProviderEvent> {
+				yield { kind: "assistant_delta", text: "done" };
+				yield { kind: "completed" };
+			}
+		}
+
+		const runner = new SubAgentRunner({
+			client: new ReadAfterParentHandoff(),
+			getModel: () => TEST_MODEL,
+			memory: "off",
+			memoryProfile: "code",
+			getThinking: async () => undefined,
+			toolFactory: () => [probe],
+		});
+		return runner
+			.run({
+				prompt: "x",
+				definition: definition(),
+				depth: 2,
+				parentCwd: process.cwd(),
+				parentSignal: new AbortController().signal,
+				parentChain: parent,
+			})
+			.then(() => {
+				expect(seen).toBe(true);
+			});
+	});
+});
+
+describe("a parent handoff relaxes a running child's budget", () => {
+	it("lets the child run past its deadline once nobody waits", async () => {
+		const client = new SlowClient(120);
+		const parent = { inBackground: false };
+		// The parent is handed off well before the child's 40ms deadline fires.
+		setTimeout(() => {
+			parent.inBackground = true;
+		}, 10);
+
+		const result = await runnerWith(client).run({
+			prompt: "nested work",
+			definition: definition({ timeoutMs: 40 }),
+			depth: 2,
+			parentCwd: process.cwd(),
+			parentSignal: new AbortController().signal,
+			parentChain: parent,
+		});
+
+		expect(result.status).toBe("completed");
+		expect(client.finished).toBe(true);
+	});
+});
+
+describe("budget covers the model-metadata preflight", () => {
+	/** Its metadata lookup hangs until cancelled, so only the budget can bound it. */
+	function stalledPreflightRunner(client: BackboardClient): SubAgentRunner {
+		return new SubAgentRunner({
+			client,
+			getModel: () => TEST_MODEL,
+			memory: "off",
+			memoryProfile: "code",
+			getThinking: async () => undefined,
+			getThinkingResolver: (_model, signal) =>
+				new Promise<RuntimeThinkingResolver>((resolve) => {
+					signal.addEventListener("abort", () =>
+						resolve({ intent: undefined, resolve: () => undefined }),
+					);
+				}),
+			toolFactory: () => [],
+		});
+	}
+
+	it("hands off a run whose preflight stalls past the deadline", async () => {
+		const started = Date.now();
+		const result = await stalledPreflightRunner(new SlowClient(200)).run({
+			prompt: "long task",
+			definition: definition({ timeoutMs: 20 }),
+			depth: 1,
+			parentCwd: process.cwd(),
+			parentSignal: new AbortController().signal,
+			onDeadline: () => ({ runId: "bg_test" }),
+		});
+
+		expect(result.status).toBe("backgrounded");
+		expect(Date.now() - started).toBeLessThan(1_000);
+	});
+
+	it("times out a foreground run whose preflight stalls without a summary turn", async () => {
+		const client = new SlowClient(200);
+		const started = Date.now();
+		const result = await stalledPreflightRunner(client).run({
+			prompt: "long task",
+			definition: definition({ timeoutMs: 20 }),
+			depth: 1,
+			parentCwd: process.cwd(),
+			parentSignal: new AbortController().signal,
+		});
+
+		expect(result.status).toBe("timed_out");
+		expect(Date.now() - started).toBeLessThan(1_000);
+		// No turn ever ran, so there was nothing for a summary turn to salvage.
+		expect(client.requests).toHaveLength(0);
 	});
 });
 
@@ -329,6 +530,7 @@ describe("handoff detaches from the turn's checkpoint", () => {
 					recordPostImage: async () => {
 						journaled++;
 					},
+					revokeCapture: async () => {},
 					revertToolCall: async () => {},
 					beginShellCapture: async () => {},
 					endShellCapture: async () => {},

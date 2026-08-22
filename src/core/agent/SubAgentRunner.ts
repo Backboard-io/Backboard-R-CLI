@@ -7,8 +7,12 @@ import { emptyRuleSet } from "../permissions/PermissionRules.ts";
 import { ClientEventLog } from "../session/ClientEventLog.ts";
 import { Session } from "../session/Session.ts";
 import type { SpawnedAgent } from "../tools/AgentToolOutput.ts";
-import type { ToolContext } from "../tools/ToolContext.ts";
+import type {
+	BackgroundChainState,
+	ToolContext,
+} from "../tools/ToolContext.ts";
 import { ToolRegistry } from "../tools/ToolRegistry.ts";
+import type { AgentLoop } from "./AgentLoop.ts";
 import { AgentLoopFactory } from "./AgentLoopFactory.ts";
 import { RunBudget } from "./RunBudget.ts";
 import {
@@ -81,9 +85,12 @@ export class SubAgentRunner {
 			if (text) reports.push(text);
 		});
 
+		const model = params.definition.model ?? this.deps.getModel();
+
 		const tools = this.deps.toolFactory({
 			depth: params.depth,
 			definition: params.definition,
+			model,
 		});
 		const registry = new ToolRegistry(tools);
 		const toolSchemas = registry.toJSONSchemas();
@@ -94,16 +101,8 @@ export class SubAgentRunner {
 		const scheduler = loopFactory.createScheduler({
 			registry,
 			bus,
-			isToolEnabled: this.deps.isToolEnabled,
+			isToolEnabled: (name) => this.deps.isToolEnabled?.(name, model) ?? true,
 		});
-
-		const model = params.definition.model ?? this.deps.getModel();
-		const thinkingResolver = this.deps.getThinkingResolver
-			? await this.deps.getThinkingResolver()
-			: undefined;
-		const thinking = thinkingResolver
-			? undefined
-			: await this.deps.getThinking();
 
 		// The sub-agent's turns live on this private bus, so the shared
 		// CheckpointStore never sees their turn:end and would never finalize a
@@ -120,14 +119,38 @@ export class SubAgentRunner {
 		const checkpoints = revocable?.recorder;
 
 		// A budget bounds how long someone waits. With a handoff, or once the
-		// chain is already backgrounded, nobody is: expiry must not abort.
+		// chain above is backgrounded, nobody is: expiry must not abort. The
+		// chain is consulted when the deadline fires, since the parent may have
+		// been handed off while this run was underway. Started before the
+		// model-metadata preflight below, which is a network round-trip: a
+		// lookup that stalls must still reach the deadline, or a call with a
+		// timeout would sit in the foreground without ever timing out or
+		// handing off.
 		const canHandOff = params.onDeadline !== undefined;
-		const noWaiter = params.parentInBackground === true;
+		const parentChain = params.parentChain;
 		const budget = RunBudget.start(
 			params.parentSignal,
 			params.timeoutMs ?? params.definition.timeoutMs,
-			{ abortOnExpiry: !canHandOff && !noWaiter },
+			{
+				abortOnExpiry: () => !canHandOff && parentChain?.inBackground !== true,
+			},
 		);
+
+		// Read through every context copy the tool rounds make, so a handoff
+		// anywhere up the chain changes what descendants see from then on.
+		// Closes over locals, not `params`, so the chain link a descendant keeps
+		// does not pin this run's prompt and permissions.
+		let handedOff = false;
+		const launchedInBackground = params.chainInBackground === true;
+		const backgroundChain: BackgroundChainState = {
+			get inBackground() {
+				return (
+					launchedInBackground ||
+					handedOff ||
+					parentChain?.inBackground === true
+				);
+			},
+		};
 
 		const ctx: ToolContext = {
 			sessionId: session.sessionId,
@@ -140,7 +163,7 @@ export class SubAgentRunner {
 			},
 			getTodos: () => session.todos,
 			agentDepth: params.depth,
-			inBackgroundChain: params.chainInBackground === true,
+			backgroundChain,
 			trace: params.trace?.context,
 			lsp: this.deps.lsp,
 			checkpoints,
@@ -152,24 +175,43 @@ export class SubAgentRunner {
 				: { mode: "manual", rules: emptyRuleSet(), interactive: false },
 		};
 
-		const loop = loopFactory.createLoop({
-			scheduler,
-			session,
-			bus,
-			tools: toolSchemas,
-			systemPrompt: subAgentSystemPrompt(params.definition.systemPrompt),
-			model,
-			memory: this.deps.memory,
-			memoryProfile: this.deps.memoryProfile,
-			thinking,
-			thinkingResolver,
-			requestKind: "subagent",
-			maxToolRounds: params.definition.maxRounds ?? MAX_SUBAGENT_TOOL_ROUNDS,
-		});
+		// Built inside `settle` so the deadline race below is already armed
+		// while the preflight runs; nothing outside may assume it exists yet.
+		let loop: AgentLoop | undefined;
 
-		let handedOff = false;
 		const settle = (async (): Promise<SubAgentResult> => {
 			try {
+				const { thinking, thinkingResolver } = await this.preflight(
+					model,
+					budget.signal,
+				);
+				// Aborted before any turn ran: nothing to run and nothing a
+				// summary turn could salvage.
+				if (budget.signal.aborted) {
+					return {
+						report: budget.timedOut
+							? TIMED_OUT_WITHOUT_REPORT
+							: "(the sub-agent produced no output)",
+						status: budget.timedOut ? "timed_out" : "cancelled",
+						usage: session.usage,
+						toolRounds: 0,
+					};
+				}
+				loop = loopFactory.createLoop({
+					scheduler,
+					session,
+					bus,
+					tools: toolSchemas,
+					systemPrompt: subAgentSystemPrompt(params.definition.systemPrompt),
+					model,
+					memory: this.deps.memory,
+					memoryProfile: this.deps.memoryProfile,
+					thinking,
+					thinkingResolver,
+					requestKind: "subagent",
+					maxToolRounds:
+						params.definition.maxRounds ?? MAX_SUBAGENT_TOOL_ROUNDS,
+				});
 				const status = await loop.run(params.prompt.trim(), ctx);
 
 				// The deadline aborted the turn; salvage what it established.
@@ -229,19 +271,42 @@ export class SubAgentRunner {
 
 		// The turn no longer owns this run, so its cancellation must not reach
 		// it, and its progress must stop touching a tool row that is now closed.
+		// Also moves `backgroundChain` to the background, so budgets stop being
+		// enforced for anything the run spawns from here on.
 		handedOff = true;
 		budget.detachFromParent();
 		detachParentProgress();
-		revocable?.revoke();
+		await revocable?.revoke();
 		return {
 			report: HANDED_OFF_REPORT,
 			status: "backgrounded",
 			usage: session.usage,
-			toolRounds: loop.toolRounds,
+			toolRounds: loop?.toolRounds ?? 0,
 			runId: handle.runId,
 			...(params.trace ? { logPath: params.trace.clientLogPath } : {}),
 			...(spawned.length ? { children: [...spawned] } : {}),
 		};
+	}
+
+	/**
+	 * Resolves the model's thinking configuration. `signal` cancels the
+	 * metadata request: an enforced deadline must not be held open by it, and
+	 * the run it belongs to is about to be cancelled anyway.
+	 */
+	private async preflight(
+		model: ModelRef,
+		signal: AbortSignal,
+	): Promise<{
+		thinking: ThinkingConfig | null | undefined;
+		thinkingResolver: RuntimeThinkingResolver | undefined;
+	}> {
+		const thinkingResolver = this.deps.getThinkingResolver
+			? await this.deps.getThinkingResolver(model, signal)
+			: undefined;
+		const thinking = thinkingResolver
+			? undefined
+			: await this.deps.getThinking(model, signal);
+		return { thinking, thinkingResolver };
 	}
 
 	/** One tool-less turn on the run's own session. Best-effort. */

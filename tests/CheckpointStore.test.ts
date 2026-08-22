@@ -66,6 +66,12 @@ function endTurn(bus: EventBus, turnId: string): void {
 
 const ctx = (turnId: string, toolCallId: string) => ({ turnId, toolCallId });
 
+/** Reaches the private per-tool-call begin snapshots to assert they are freed. */
+function shellBeginCount(store: CheckpointStore): number {
+	return (store as unknown as { shellBegins: Map<string, unknown> }).shellBegins
+		.size;
+}
+
 async function undoLatest(store: CheckpointStore, skipDiverged = false) {
 	const target = store.undoTarget();
 	if (!target) throw new Error("expected an undo target");
@@ -649,6 +655,112 @@ describe("revocableRecorder", () => {
 
 		expect(await readFile(fileA, "utf8")).toBe("a v0");
 		expect(existsSync(fileB)).toBe(false);
+	});
+
+	it("drops a pre-image whose write was still pending when it was revoked", async () => {
+		const { bus, store } = makeStore();
+		const file = join(work, "f.txt");
+		await writeFile(file, "v0", "utf8");
+
+		startTurn(bus, "t1");
+		const { recorder, revoke } = revocableRecorder(store.scopedToTurn("t1"));
+		// The capture returns, then the run is backgrounded before its write.
+		await recorder.recordPreImage(file, ctx("t1", "c1"), { tool: "Edit" });
+		await revoke();
+		await writeFile(file, "background result", "utf8");
+		await recorder.recordPostImage(file, ctx("t1", "c1"), Buffer.from("bg"));
+		endTurn(bus, "t1");
+
+		// Nothing left for the turn to own, so /undo cannot clobber the write.
+		expect(store.listCheckpoints()).toHaveLength(0);
+		expect(await readFile(file, "utf8")).toBe("background result");
+	});
+
+	it("keeps a pre-image its post-image already settled", async () => {
+		const { bus, store } = makeStore();
+		const file = join(work, "f.txt");
+		await writeFile(file, "v0", "utf8");
+
+		startTurn(bus, "t1");
+		const { recorder, revoke } = revocableRecorder(store.scopedToTurn("t1"));
+		await recorder.recordPreImage(file, ctx("t1", "c1"), { tool: "Edit" });
+		await writeFile(file, "v1", "utf8");
+		await recorder.recordPostImage(file, ctx("t1", "c1"), Buffer.from("v1"));
+		await revoke();
+		endTurn(bus, "t1");
+
+		expect(store.listCheckpoints()).toHaveLength(1);
+		await undoLatest(store);
+		expect(await readFile(file, "utf8")).toBe("v0");
+	});
+
+	it("ignores a revoke for an entry journaled by another session's store", async () => {
+		const { bus, store } = makeStore();
+		const file = join(work, "f.txt");
+		await writeFile(file, "v0", "utf8");
+
+		startTurn(bus, "t1");
+		await store.recordPreImage(file, ctx("t1", "c1"), { tool: "Edit" });
+		await writeFile(file, "v1", "utf8");
+		await store.recordPostImage(file, ctx("t1", "c1"), Buffer.from("v1"));
+		endTurn(bus, "t1");
+
+		// A run that outlived a session switch revokes through the manager into
+		// this store with a seq that only meant something in its own journal.
+		const foreign = store.listCheckpoints()[0];
+		expect(foreign).toBeDefined();
+		await store.revokeCapture({
+			journalRoot: join(root, "elsewhere"),
+			turnId: "t1",
+			ref: 1,
+			path: file,
+		});
+
+		expect(store.listCheckpoints()).toHaveLength(1);
+		await undoLatest(store);
+		expect(await readFile(file, "utf8")).toBe("v0");
+	});
+
+	it("keeps a write that finished before revocation even if its post-image had not landed", async () => {
+		const { bus, store } = makeStore();
+		const file = join(work, "f.txt");
+		await writeFile(file, "v0", "utf8");
+
+		startTurn(bus, "t1");
+		const { recorder, revoke } = revocableRecorder(store.scopedToTurn("t1"));
+		await recorder.recordPreImage(file, ctx("t1", "c1"), { tool: "Edit" });
+		await writeFile(file, "v1", "utf8");
+		// The handoff lands while the post-image is still being recorded.
+		const post = recorder.recordPostImage(file, ctx("t1", "c1"));
+		await revoke();
+		await post;
+		endTurn(bus, "t1");
+
+		// The write happened under the turn, so /undo still owns it.
+		expect(store.listCheckpoints()).toHaveLength(1);
+		await undoLatest(store);
+		expect(await readFile(file, "utf8")).toBe("v0");
+	});
+
+	it("releases the shell begin snapshot when end runs after revocation", async () => {
+		const { bus, store } = makeStore();
+		const file = join(work, "sh.txt");
+		await writeFile(file, "v0", "utf8");
+
+		startTurn(bus, "t1");
+		const { recorder, revoke } = revocableRecorder(store.scopedToTurn("t1"));
+		await recorder.beginShellCapture(work, ctx("t1", "c1"));
+		await revoke();
+		await writeFile(file, "v1", "utf8");
+		await recorder.endShellCapture(ctx("t1", "c1"));
+		endTurn(bus, "t1");
+
+		// Journaling stayed suppressed...
+		expect(store.listCheckpoints()).toHaveLength(0);
+		// ...but the begin snapshot was released, so a later end is a no-op
+		// rather than a diff against a baseline that outlived the run.
+		await recorder.endShellCapture(ctx("t1", "c1"));
+		expect(shellBeginCount(store)).toBe(0);
 	});
 
 	it("rejects a revoked requireRevertible capture before any write happens", async () => {

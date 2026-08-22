@@ -7,7 +7,7 @@ describe("startNewSession", () => {
 
 		await expect(
 			startNewSession({
-				detach: () => {},
+				detach: async () => {},
 				activate: async () => {
 					throw new Error("session init failed");
 				},
@@ -24,7 +24,9 @@ describe("startNewSession", () => {
 		const order: string[] = [];
 
 		await startNewSession({
-			detach: () => order.push("detach"),
+			detach: async () => {
+				order.push("detach");
+			},
 			activate: async () => {
 				order.push("activate");
 			},

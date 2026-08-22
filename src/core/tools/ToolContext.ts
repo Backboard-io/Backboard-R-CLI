@@ -19,6 +19,16 @@ export type AskQuestionsFn = (
 	questions: AskUserQuestionSpec[],
 ) => Promise<string[]>;
 
+/**
+ * Whether a foreground turn is still waiting on this chain. Read through a
+ * live object rather than copied as a boolean: a run can be moved to the
+ * background long after every tool round has spread its own copy of the
+ * context, and budgets below it stop being enforced from that moment on.
+ */
+export interface BackgroundChainState {
+	readonly inBackground: boolean;
+}
+
 export interface ToolTraceContext {
 	forToolCall(toolCallId: string): ToolTraceContext;
 	createAgentTrace(input: {
@@ -49,7 +59,7 @@ export interface ToolContext {
 	getTodos?: () => readonly TodoItem[];
 	agentDepth?: number;
 	/** No foreground turn is waiting on this chain, so budgets below stop enforcing. */
-	inBackgroundChain?: boolean;
+	backgroundChain?: BackgroundChainState;
 	trace?: ToolTraceContext;
 	/** Optional language-server service for post-edit diagnostics. */
 	lsp?: LspService;

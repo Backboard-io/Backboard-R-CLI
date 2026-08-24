@@ -87,6 +87,32 @@ describe("switchable session event logs", () => {
 		client.detach();
 	});
 
+	it("continues initial sequence numbers when startup opens an existing session", async () => {
+		const root = await mkdtemp(path.join(os.tmpdir(), "session-logs-"));
+		const clientPath = path.join(root, "client.jsonl");
+		const serverPath = path.join(root, "server.jsonl");
+		await writeFile(clientPath, '{"sequence":7}\n', "utf8");
+		await writeFile(serverPath, '{"sequence":4}\n', "utf8");
+		const bus = new EventBus();
+		const client = new ClientEventLog("sess_resumed", clientPath);
+		const server = new ServerEventLog("sess_resumed", serverPath);
+		await Promise.all([client.initialize(), server.initialize()]);
+		client.attach(bus);
+
+		bus.emit({ type: "system:warning", message: "continued" });
+		server.request({
+			endpoint: "/continued",
+			method: "GET",
+			headers: {},
+			body: null,
+		});
+		await Promise.all([client.flush(), server.flush()]);
+
+		expect(await readFile(clientPath, "utf8")).toContain('"sequence":8');
+		expect(await readFile(serverPath, "utf8")).toContain('"sequence":5');
+		client.detach();
+	});
+
 	it("continues after an oversized final JSONL record", async () => {
 		const root = await mkdtemp(path.join(os.tmpdir(), "session-logs-"));
 		const initialClient = path.join(root, "initial-client.jsonl");

@@ -158,4 +158,25 @@ describe("ProviderStreamConsumer", () => {
 
 		expect(preserved).toBe(1);
 	});
+
+	it("emits a thread event only when the provider thread changes", async () => {
+		const bus = new EventBus();
+		const session = new Session("sess_test");
+		const threadIds: string[] = [];
+		bus.on("session:thread", (event) => threadIds.push(event.threadId));
+		const consumer = new ProviderStreamConsumer(bus, session);
+
+		await consumer.consumeWithRetry(
+			() =>
+				streamOf([
+					{ kind: "thread", threadId: "thread_1" },
+					{ kind: "thread", threadId: "thread_1" },
+					{ kind: "completed", finalText: "ok" },
+				]),
+			stubAssistant(),
+			new AbortController().signal,
+		);
+
+		expect(threadIds).toEqual(["thread_1"]);
+	});
 });

@@ -1,10 +1,10 @@
 import { describe, expect, it } from "bun:test";
+import type {
+	BrowserAccessibilitySnapshot as AccessibilitySnapshot,
+	BrowserPlatformAction as PlatformAction,
+} from "../src/core/browser/BrowserPlatformBase.ts";
 import { BrowserRuntime } from "../src/core/browser/BrowserRuntime.ts";
 import type { BrowserPlatform } from "../src/core/browser/BrowserTypes.ts";
-import type {
-	AccessibilitySnapshot,
-	PlatformAction,
-} from "../src/core/platform/index.ts";
 import { BrowserTool } from "../src/tools/BrowserTool.tsx";
 import { makeContext } from "./helpers.ts";
 

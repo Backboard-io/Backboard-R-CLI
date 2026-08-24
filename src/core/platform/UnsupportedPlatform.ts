@@ -1,9 +1,17 @@
-import { BasePlatform } from "./BasePlatform.ts";
-import type { PlatformAction, ScreenshotCapture } from "./types.ts";
+import type {
+	AccessibilitySnapshot,
+	Platform,
+	PlatformAction,
+	PlatformOs,
+	ScreenshotCapture,
+	SettleResult,
+} from "./types.ts";
 
-export class UnsupportedPlatform extends BasePlatform {
+export class UnsupportedPlatform implements Platform {
+	readonly os: PlatformOs;
+
 	constructor(private readonly platform: string) {
-		super();
+		this.os = platform === "linux" ? "linux" : "linux";
 	}
 
 	async screenshot(): Promise<ScreenshotCapture> {
@@ -12,9 +20,19 @@ export class UnsupportedPlatform extends BasePlatform {
 		);
 	}
 
+	async accessibilitySnapshot(): Promise<AccessibilitySnapshot> {
+		return { elements: [] };
+	}
+
+	async settle(): Promise<SettleResult> {
+		return { settled: false, elapsedMs: 0 };
+	}
+
 	async execute(action: PlatformAction): Promise<void> {
 		throw new Error(
 			`Computer action "${action.kind}" is not supported on ${this.platform}`,
 		);
 	}
+
+	async dispose(): Promise<void> {}
 }

@@ -1,10 +1,12 @@
 import type { ImageContentPayload } from "../image/ImageContent.ts";
+import type { AccessibilityElement, ScreenSize } from "../platform/index.ts";
 import type {
-	AccessibilityElement,
-	ImagePayload,
-	Platform,
-	ScreenshotCapture,
-} from "../platform/index.ts";
+	BrowserAccessibilitySnapshot,
+	BrowserFitPngInput,
+	BrowserImagePayload,
+	BrowserPlatformAction,
+	BrowserScreenshotCapture,
+} from "./BrowserPlatformBase.ts";
 
 export type BrowserMouseButton = "left" | "right" | "middle";
 
@@ -28,8 +30,8 @@ export interface BrowserObservation
 	extends Partial<ImageContentPayload<"image/png">> {
 	success: true;
 	action: "screenshot";
-	screenSize: ScreenshotCapture["screenSize"];
-	imageSize: ImagePayload["imageSize"];
+	screenSize: ScreenSize;
+	imageSize: ScreenSize;
 	screenshotPath: string;
 	screenshotScale: number;
 	windowTitle?: string;
@@ -49,6 +51,15 @@ export interface BrowserQueueResult {
 	results: Array<BrowserObservation | BrowserActionResult>;
 }
 
-export interface BrowserPlatform extends Platform {
+export interface BrowserPlatform {
+	screenshot(
+		path: string,
+		signal: AbortSignal,
+	): Promise<BrowserScreenshotCapture>;
+	accessibilitySnapshot(
+		signal: AbortSignal,
+	): Promise<BrowserAccessibilitySnapshot>;
+	fitPngForPayload(input: BrowserFitPngInput): Promise<BrowserImagePayload>;
+	execute(action: BrowserPlatformAction, signal: AbortSignal): Promise<void>;
 	navigate(url: string, signal: AbortSignal): Promise<void>;
 }

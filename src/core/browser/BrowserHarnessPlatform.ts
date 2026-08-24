@@ -1,18 +1,17 @@
 import { writeFile } from "node:fs/promises";
-import { BasePlatform } from "../platform/BasePlatform.ts";
-import { pngSize } from "../platform/png.ts";
-import type {
-	AccessibilityElement,
-	AccessibilitySnapshot,
-	PlatformAction,
-	PlatformKey,
-	ScreenBounds,
-	ScreenshotCapture,
-} from "../platform/types.ts";
+import { imageSize as pngSize } from "../platform/png.ts";
+import type { PlatformKey, ScreenBounds } from "../platform/types.ts";
 import {
 	type BrowserHarnessClient,
 	BrowserHarnessSession,
 } from "./BrowserHarnessSession.ts";
+import {
+	type BrowserAccessibilityElement as AccessibilityElement,
+	type BrowserAccessibilitySnapshot,
+	type BrowserPlatformAction,
+	BrowserPlatformBase,
+	type BrowserScreenshotCapture,
+} from "./BrowserPlatformBase.ts";
 import type { BrowserPlatform } from "./BrowserTypes.ts";
 
 interface CaptureResult {
@@ -40,7 +39,7 @@ interface DomElementSnapshot {
 }
 
 export class BrowserHarnessPlatform
-	extends BasePlatform
+	extends BrowserPlatformBase
 	implements BrowserPlatform
 {
 	private readonly client: BrowserHarnessClient;
@@ -54,7 +53,7 @@ export class BrowserHarnessPlatform
 	async screenshot(
 		path: string,
 		signal: AbortSignal,
-	): Promise<ScreenshotCapture> {
+	): Promise<BrowserScreenshotCapture> {
 		await this.client.call("Page.enable", {}, signal);
 		const [shot, metrics] = await Promise.all([
 			this.client.call<CaptureResult>(
@@ -84,7 +83,7 @@ export class BrowserHarnessPlatform
 
 	override async accessibilitySnapshot(
 		signal: AbortSignal,
-	): Promise<AccessibilitySnapshot> {
+	): Promise<BrowserAccessibilitySnapshot> {
 		const result = await this.client.call<RuntimeEvaluateResult>(
 			"Runtime.evaluate",
 			{
@@ -108,7 +107,10 @@ export class BrowserHarnessPlatform
 		};
 	}
 
-	async execute(action: PlatformAction, signal: AbortSignal): Promise<void> {
+	async execute(
+		action: BrowserPlatformAction,
+		signal: AbortSignal,
+	): Promise<void> {
 		switch (action.kind) {
 			case "openApp":
 				if (/^(chrome|chromium|browser)$/i.test(action.appName)) return;

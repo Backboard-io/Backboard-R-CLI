@@ -1,0 +1,362 @@
+{
+	"name": "calc-nine-coords",
+	"instruction": "Click the 9 key.",
+	"os": "darwin",
+	"image": "calc-nine-coords.png",
+	"mediaType": "image/png",
+	"screenSize": {
+		"width": 230,
+		"height": 408
+	},
+	"appName": "Calculator",
+	"windowTitle": "Calculator",
+	"elements": [
+		{
+			"bounds": {
+				"width": 230,
+				"x": 0,
+				"height": 408,
+				"y": 0
+			},
+			"role": "Window",
+			"id": "el_1",
+			"name": "Calculator"
+		},
+		{
+			"bounds": {
+				"width": 47.5,
+				"height": 26,
+				"y": 59.5,
+				"x": 172.5
+			},
+			"id": "el_2",
+			"role": "StaticText",
+			"name": "‎12‎×‎3"
+		},
+		{
+			"name": "‎36",
+			"id": "el_3",
+			"role": "StaticText",
+			"bounds": {
+				"height": 36,
+				"y": 89,
+				"x": 182,
+				"width": 38
+			}
+		},
+		{
+			"role": "Button",
+			"bounds": {
+				"x": 10,
+				"width": 48,
+				"y": 133,
+				"height": 48
+			},
+			"id": "el_4",
+			"name": "Delete"
+		},
+		{
+			"name": "All Clear",
+			"role": "Button",
+			"bounds": {
+				"width": 48,
+				"x": 64,
+				"y": 133,
+				"height": 48
+			},
+			"id": "el_5"
+		},
+		{
+			"bounds": {
+				"y": 133,
+				"height": 48,
+				"width": 48,
+				"x": 118
+			},
+			"role": "Button",
+			"id": "el_6",
+			"name": "Percent"
+		},
+		{
+			"role": "Button",
+			"id": "el_7",
+			"name": "Divide",
+			"bounds": {
+				"width": 48,
+				"x": 172,
+				"y": 133,
+				"height": 48
+			}
+		},
+		{
+			"name": "7",
+			"id": "el_8",
+			"role": "Button",
+			"bounds": {
+				"y": 187,
+				"height": 48,
+				"width": 48,
+				"x": 10
+			}
+		},
+		{
+			"bounds": {
+				"width": 48,
+				"x": 64,
+				"y": 187,
+				"height": 48
+			},
+			"id": "el_9",
+			"role": "Button",
+			"name": "8"
+		},
+		{
+			"bounds": {
+				"x": 118,
+				"y": 187,
+				"width": 48,
+				"height": 48
+			},
+			"name": "9",
+			"role": "Button",
+			"id": "el_10"
+		},
+		{
+			"bounds": {
+				"x": 172,
+				"y": 187,
+				"width": 48,
+				"height": 48
+			},
+			"name": "Multiply",
+			"id": "el_11",
+			"role": "Button"
+		},
+		{
+			"bounds": {
+				"y": 241,
+				"x": 10,
+				"width": 48,
+				"height": 48
+			},
+			"name": "4",
+			"role": "Button",
+			"id": "el_12"
+		},
+		{
+			"name": "5",
+			"bounds": {
+				"x": 64,
+				"y": 241,
+				"height": 48,
+				"width": 48
+			},
+			"id": "el_13",
+			"role": "Button"
+		},
+		{
+			"bounds": {
+				"y": 241,
+				"x": 118,
+				"width": 48,
+				"height": 48
+			},
+			"id": "el_14",
+			"name": "6",
+			"role": "Button"
+		},
+		{
+			"bounds": {
+				"y": 241,
+				"width": 48,
+				"x": 172,
+				"height": 48
+			},
+			"name": "Subtract",
+			"id": "el_15",
+			"role": "Button"
+		},
+		{
+			"bounds": {
+				"width": 48,
+				"x": 10,
+				"y": 295,
+				"height": 48
+			},
+			"role": "Button",
+			"name": "1",
+			"id": "el_16"
+		},
+		{
+			"id": "el_17",
+			"bounds": {
+				"y": 295,
+				"width": 48,
+				"height": 48,
+				"x": 64
+			},
+			"name": "2",
+			"role": "Button"
+		},
+		{
+			"bounds": {
+				"y": 295,
+				"height": 48,
+				"x": 118,
+				"width": 48
+			},
+			"id": "el_18",
+			"name": "3",
+			"role": "Button"
+		},
+		{
+			"id": "el_19",
+			"name": "Add",
+			"role": "Button",
+			"bounds": {
+				"y": 295,
+				"x": 172,
+				"height": 48,
+				"width": 48
+			}
+		},
+		{
+			"role": "Button",
+			"bounds": {
+				"width": 48,
+				"height": 48,
+				"x": 10,
+				"y": 349
+			},
+			"id": "el_20",
+			"name": "Change Sign"
+		},
+		{
+			"name": "0",
+			"id": "el_21",
+			"bounds": {
+				"y": 349,
+				"width": 48,
+				"x": 64,
+				"height": 48
+			},
+			"role": "Button"
+		},
+		{
+			"bounds": {
+				"width": 48,
+				"y": 349,
+				"height": 48,
+				"x": 118
+			},
+			"id": "el_22",
+			"role": "Button",
+			"name": "Point"
+		},
+		{
+			"id": "el_23",
+			"name": "Equals",
+			"role": "Button",
+			"bounds": {
+				"width": 48,
+				"x": 172,
+				"height": 48,
+				"y": 349
+			}
+		},
+		{
+			"name": "Show Sidebar",
+			"bounds": {
+				"y": 0,
+				"x": 100,
+				"width": 48,
+				"height": 52
+			},
+			"role": "Button",
+			"id": "el_24"
+		},
+		{
+			"bounds": {
+				"y": 8,
+				"x": 104.5,
+				"height": 36,
+				"width": 39.5
+			},
+			"id": "el_25",
+			"name": "Show Sidebar",
+			"role": "Button"
+		},
+		{
+			"bounds": {
+				"width": 44,
+				"y": 0,
+				"height": 52,
+				"x": 182
+			},
+			"id": "el_26",
+			"role": "Button",
+			"name": "Mode"
+		},
+		{
+			"id": "el_27",
+			"bounds": {
+				"x": 186,
+				"width": 36,
+				"y": 8,
+				"height": 36
+			},
+			"role": "Button",
+			"name": "Change Mode"
+		},
+		{
+			"id": "el_28",
+			"role": "MenuButton",
+			"bounds": {
+				"x": 186,
+				"height": 36,
+				"width": 36,
+				"y": 8
+			},
+			"name": "calculator.fill"
+		},
+		{
+			"role": "Button",
+			"bounds": {
+				"y": 18,
+				"x": 18,
+				"width": 16,
+				"height": 16
+			},
+			"id": "el_29"
+		},
+		{
+			"id": "el_30",
+			"role": "Button",
+			"bounds": {
+				"y": 18,
+				"x": 64,
+				"width": 16,
+				"height": 16
+			},
+			"enabled": false
+		},
+		{
+			"bounds": {
+				"y": 18,
+				"width": 16,
+				"x": 41,
+				"height": 16
+			},
+			"id": "el_31",
+			"role": "Button"
+		}
+	],
+	"expected": {
+		"x": 118,
+		"y": 187,
+		"width": 48,
+		"height": 48
+	},
+	"expectedElementId": "el_10",
+	"hideTarget": true
+}

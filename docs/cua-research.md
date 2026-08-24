@@ -1,6 +1,6 @@
-# CUA (Computer Use) — review, research, and roadmap
+# CUA (Computer Use) — review, research, implementation, and evals
 
-Branch `qli/main/cua`. Written 2026-08-24 from a code review of the current `Computer` tool plus web research on provider tool designs, speed techniques, and eval infrastructure. Every external claim carries a source link. Local latency numbers were measured on a 2× Retina MacBook with a second display attached.
+Branch `qli/main/cua`. Written 2026-08-24 from a code review of the previous `Computer` tool plus web research on provider tool designs, speed techniques, and eval infrastructure; Part 6 documents what was then built on this branch and the measured results. Every external claim carries a source link. Local latency numbers were measured on a 2× Retina MacBook with a second display attached.
 
 **TL;DR**
 
@@ -308,3 +308,74 @@ Replace both copies with one module that says: coordinate space; what the observ
 3. Persistent Swift helper + settle detection + scroll/drag/double-click.
 4. `DaytonaPlatform` + Tier-1 suite.
 5. Windows parity via the persistent host.
+
+## Part 6 — What was built on this branch
+
+Everything in Parts 1–5 that is marked below as *done* shipped in this branch; the bug table in Part 1 is resolved as noted.
+
+### Architecture
+
+```
+ComputerTool (schema, aliases, permissions)
+  └─ ComputerRuntime (batch semantics, settle, single observation, element refresh)
+       ├─ ComputerObserver (one IPC → screenshot + a11y, JPEG ≤1280px, retention)
+       └─ Platform
+            ├─ MacPlatform   → HelperProcess → compiled Swift helper (ScreenCaptureKit, AX, CGEvent)
+            ├─ WindowsPlatform → HelperProcess → persistent PowerShell host (SendInput, UIA CacheRequest)
+            ├─ DaytonaPlatform (scripts/cua-eval) → @daytona/sdk computerUse (Linux XFCE)
+            └─ FixturePlatform (scripts/cua-eval) → saved screenshot + elements, records clicks
+```
+
+- **Native helper, not per-call scripts.** `src/core/platform/mac/cuaHelper.swift` is embedded as text, compiled once with `swiftc` into `~/.backboard/bin/cua-helper-<hash>` (2.4 s, cached by source hash), and kept alive as a JSON-lines process. Windows uses the same protocol via `windows/cuaHelper.ps1` in a `-NoProfile` host that stays open. `HelperProcess` handles ids, timeouts, abort, crash → respawn.
+- **Point space everywhere.** The helper reports the display that holds the frontmost window, in points, and downscales the capture itself (`screenSize` = points, `imageSize` = pixels sent, `scale` = ratio). Fixes C1 and M1.
+- **Batch semantics** (Anthropic/OpenAI style): run in order, stop at first failure, remaining actions come back `skipped: true`, then *one* settle (frame-diff poll, 1.2 s / 3 s after openApp) and *one* observation that carries the only image in the payload. Fixes C2 and M7.
+- **Element ids survive a batch.** After any state-changing action, an `elementId` target re-reads the accessibility tree (~20 ms) and re-matches by role+name or overlap before clicking, so `[click field, type, click Save]` lands on Save even when the layout shifted. Fixes H1.
+- **Action set**: `screenshot, zoom{region}, click{count,button,modifiers}, move, drag, scroll{direction,amount}, type, key{repeat}, holdKey, wait, openApp`. Provider dialects (`left_click`, `coordinate:[x,y]`, `keypress{keys}`, `scroll_y`, `duration` seconds, `type:` instead of `action:` …) are normalized in `ComputerTool.normalizeComputerInput`. Fixes H2, H6 (full key table, xdotool-style names, chord strings).
+- **Accessibility**: focused window only (plus attached sheets/dialogs *and* the main window when a sheet is focused), interactive-role whitelist, on-screen bounds only, ≤80 elements, no per-element app metadata, real window title, `focusedElementId`, `modal`, and `trusted:false` when the permission is missing. Fixes H3.
+- **Keyboard layout**: character keys are resolved through the active layout with `UCKeyTranslate`; this machine runs Colemak, where a QWERTY key-code table sent ⌘K for `cmd+n`. Modifier chords post real modifier key-down/up events, because setting flags on the key event alone leaves ⌘ "held" in the window server for every later event. Fixes H5-adjacent correctness.
+- **Prompt**: one module (`prompts/tools/computer.tsx`) rendered by both profiles; states the coordinate space, that the final screen is attached (no trailing screenshot), batching guidance, key format, prefer-CLI guidance, and the confirm-before-irreversible rule. Fixes M5, M6.
+- **Permissions**: `isReadOnly` when every action is `screenshot|zoom|wait|move`; `summarizeInput` renders the batch in the prompt; `permissionHint` flags credential-looking text. Fixes M2.
+- **Retention**: per-session cap 50 MB, other sessions pruned after 7 days. Fixes M3. Abort-safe `delay`. Fixes M4.
+- **Windows** ships `type`/`key`/`scroll`/`drag` through `SendInput` (fixes C3) — written against the documented APIs but **not executed on a Windows machine in this branch**; treat as needing a first run there.
+
+### Measured on this machine (macOS 26, M-series, 1920×1080 external + Retina internal)
+
+| Operation | Before | After |
+|---|---|---|
+| a11y snapshot | `swift -e`: 1363 ms cold / 332 ms warm | helper `ax`: ~20–60 ms |
+| click / key / type | `osascript`: ~355 ms each | CGEvent via helper: 2–25 ms |
+| screenshot + a11y + encode | `screencapture` + `sips` + swift: ~1.9 s | one `observe` IPC: 55–90 ms (JPEG q85 @1280, ~130 KB) |
+| zoom region | n/a | 41–57 ms |
+| settle after typing | fixed 300 ms | frame-diff: 240–350 ms, exits early when static |
+| batch `openApp → cmd+n` incl. settle + observation | ~4 s+ | 1.3–3.5 s (dominated by app launch) |
+| payload per call | up to 21 images | exactly 1 image, ~130–150 KB |
+
+`scripts/cua-smoke.ts` output on this branch: open TextEdit + ⌘N (1.3–3.5 s), type sentence + ⌘A (0.39 s, text verified in the `TextArea` element), zoom (0.05 s), scroll + move (0.3 s), ⌘W then click the sheet's *Delete* button by `elementId` — **SMOKE PASSED**.
+
+### Evals (all runnable from `package.json`)
+
+| Tier | Command | What ran | Result |
+|---|---|---|---|
+| unit | `bun test` | 1430 tests incl. 60+ for the tool, runtime, keys, paths, helper process | pass |
+| e2e (mac) | `bun run cua:e2e` | compile + cache helper, point-space capture, zoom, a11y, settle, cursor move | 5/5 pass, 3.6 s |
+| smoke (mac) | `bun run cua:smoke` | real app flow above | pass |
+| Tier 0 | `bun run cua:grounding` | 8 Calculator fixtures (6 element-id, 2 coordinate-only) through the real agent loop | **8/8**, 7–13 s each, gpt-5.5 |
+| Tier 1 | `bun run cua:eval -f editor-save-hello,terminal-create-dir` | fresh Daytona XFCE sandbox per task, real agent loop with Computer + Execute, programmatic checker | **2/2**: 8 rounds / 5 Computer calls / 64 s; 6 rounds / 4 calls / 57 s |
+| Tier 1 full | `bun run cua:eval -c 3` | 10 tasks (editor ×3, terminal, settings ×2, web ×2, multi ×2), fresh sandbox each, gpt-5.5 | **9/10** across the runs below; `web-read-and-record` is the open one |
+
+Full-suite run (first pass, before the harness fixes below): 6/10 — 86 rounds, 66 Computer calls, 95 actions (1.44 actions/call), 64 images, 18 min wall for ~1,076 s of sandbox time, 3.6M input tokens (~25–30k per round). The four failures were all **harness bugs, not agent bugs**, and each was diagnosed in a live sandbox:
+
+1. The desktop is `DISPLAY=:0`, not `:1` (the docs' example), and the process API passes no session environment — `xfce4-settings-manager` launched by the agent wrote to a throwaway xfconfd. Fix: read `DISPLAY`/`DBUS_SESSION_BUS_ADDRESS`/XDG vars from the live `xfce4-session` and export them in every exec. Both settings tasks then passed (7 rounds/4 calls/62 s; 13 rounds/10 calls/97 s).
+2. Ubuntu-style `firefox` is a snap stub; the image is Debian 13 with `chromium` preinstalled, which needs `--no-sandbox --disable-gpu --disable-dev-shm-usage` in a container and `GTK_MODULES=gail:atk-bridge` + `--force-renderer-accessibility` to appear in AT-SPI. The AT-SPI walk must also start from the active application frame, not the desktop root (the panel exhausted the element budget). `web-form-submit` then passed (5 rounds/4 calls/129 s — the model filled the form through a `javascript:` bookmarklet in the address bar).
+3. `apt-cache`/`--version` probes must ignore snap stubs; `sudo -n` is required (non-root `daytona` user).
+
+Two agent-behaviour findings worth acting on: with no elements in the tree the model **reported "Filled and submitted the signup form" when nothing had been submitted** (only the programmatic checker caught it), and on the open task it burned all 20 rounds cycling through bookmarklets, terminals, and `F11` instead of using the `Execute` tool it had. Both argue for the eval's checker-based scoring and for prompt work on "verify before claiming done". `web-read-and-record` stays red after three attempts (11–20 rounds each): once it saved the page `<title>` instead of the `<h1>` (the page was then disambiguated), once it wrote an empty file and reported success. Chromium's page content still does not surface in AT-SPI despite `--force-renderer-accessibility`, so the browser tasks run screenshot-only — the Browser tool (CDP) remains the better path for web work.
+
+Fixtures are cropped to the app window (`capture-fixture.ts --window`) so nothing else on the screen is committed.
+
+### Not done / next
+
+- Windows helper needs its first run on a Windows machine.
+- `DaytonaPlatform` approximates modifier-clicks and horizontal scroll (SDK has no primitives).
+- Interval-based image pruning / cache breakpoints live server-side; verify the server does not re-send every screenshot per turn (each Tier-1 round cost ~25–30k input tokens).
+- Speculative next-action prediction and learned macros (Part 3.4) are not started.

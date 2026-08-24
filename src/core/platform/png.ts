@@ -1,50 +1,51 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import type { ImagePayload, ResizePngInput, ScreenSize } from "./types.ts";
+import type { ScreenSize } from "./types.ts";
 
-const RESIZE_WIDTHS = [1280, 960, 720, 540, 360];
-
-export async function resizeWithCandidates(
-	input: ResizePngInput,
-	resize: (width: number, out: string) => Promise<void>,
-): Promise<ImagePayload | null> {
-	const dir = await mkdtemp(join(tmpdir(), "cua-image-"));
-	try {
-		let smallest: ImagePayload | null = null;
-		for (const width of RESIZE_WIDTHS) {
-			if (width >= input.screenSize.width) continue;
-			const out = join(dir, `screen-${width}.png`);
-			await resize(width, out);
-			const bytes = await readFile(out);
-			const imageSize = pngSize(bytes, "resized screenshot");
-			const payload = {
-				bytes,
-				imageSize,
-				scale: imageSize.width / input.screenSize.width,
-				compressed: true,
-			};
-			smallest = payload;
-			if (bytes.byteLength <= input.maxBytes) return payload;
-		}
-		return smallest && smallest.bytes.byteLength <= input.maxBytes
-			? smallest
-			: null;
-	} finally {
-		await rm(dir, { recursive: true, force: true });
-	}
-}
-
-export function pngSize(bytes: Buffer, label: string): ScreenSize {
+/** Reads the pixel dimensions from a PNG or JPEG header. */
+export function imageSize(bytes: Buffer, label: string): ScreenSize {
 	if (
-		bytes.length < 24 ||
-		bytes.toString("ascii", 1, 4) !== "PNG" ||
-		bytes.toString("ascii", 12, 16) !== "IHDR"
+		bytes.length >= 24 &&
+		bytes.toString("ascii", 1, 4) === "PNG" &&
+		bytes.toString("ascii", 12, 16) === "IHDR"
 	) {
-		throw new Error(`${label} is not a valid PNG`);
+		return {
+			width: bytes.readUInt32BE(16),
+			height: bytes.readUInt32BE(20),
+		};
 	}
-	return {
-		width: bytes.readUInt32BE(16),
-		height: bytes.readUInt32BE(20),
-	};
+	if (bytes.length >= 4 && bytes[0] === 0xff && bytes[1] === 0xd8) {
+		let offset = 2;
+		while (offset + 9 < bytes.length) {
+			if (bytes[offset] !== 0xff) {
+				offset++;
+				continue;
+			}
+			const marker = bytes[offset + 1] ?? 0;
+			if (
+				marker === 0xd8 ||
+				marker === 0x01 ||
+				(marker >= 0xd0 && marker <= 0xd7)
+			) {
+				offset += 2;
+				continue;
+			}
+			const length = bytes.readUInt16BE(offset + 2);
+			if (
+				marker >= 0xc0 &&
+				marker <= 0xcf &&
+				marker !== 0xc4 &&
+				marker !== 0xc8 &&
+				marker !== 0xcc
+			) {
+				return {
+					height: bytes.readUInt16BE(offset + 5),
+					width: bytes.readUInt16BE(offset + 7),
+				};
+			}
+			offset += 2 + length;
+		}
+	}
+	throw new Error(`${label} is not a valid PNG or JPEG`);
 }
+
+/** @deprecated use imageSize */
+export const pngSize = imageSize;

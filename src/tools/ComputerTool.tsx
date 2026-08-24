@@ -264,7 +264,7 @@ export class ComputerTool extends Tool<Input, ComputerQueueResult> {
 		});
 		return ok(
 			result,
-			JSON.stringify(result),
+			JSON.stringify(hoistObservationImage(result)),
 			computerResultTitle(input.actions, result),
 			computerResultDetail(result),
 		);
@@ -273,6 +273,23 @@ export class ComputerTool extends Tool<Input, ComputerQueueResult> {
 	override async dispose(): Promise<void> {
 		await this.runtime.dispose();
 	}
+}
+
+/**
+ * Backboard's server lifts `__image_base64` into a real image block only when
+ * it sits at the top level of the tool output, so the observation's image is
+ * moved there for the wire. Local consumers keep the structured `data`.
+ */
+export function hoistObservationImage(result: ComputerQueueResult): object {
+	const observation = result.observation;
+	if (!observation?.__image_base64) return result;
+	const { __image_base64, __image_media_type, ...rest } = observation;
+	return {
+		...result,
+		observation: rest,
+		__image_base64,
+		__image_media_type,
+	};
 }
 
 function computerResultTitle(

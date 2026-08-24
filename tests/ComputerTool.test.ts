@@ -394,6 +394,14 @@ describe("ComputerRuntime batches", () => {
 		expect(data.observation?.imageSize).toEqual({ width: 1280, height: 800 });
 		expect(data.observation?.scale).toBeCloseTo(1280 / 1440, 5);
 		expect(result.forLLM.split("__image_base64").length - 1).toBe(1);
+		// The wire payload carries the image at the top level (what Backboard's
+		// server lifts); the structured data keeps it on the observation.
+		const wire = JSON.parse(result.forLLM) as Record<string, unknown>;
+		expect(typeof wire.__image_base64).toBe("string");
+		expect(wire.__image_media_type).toBe("image/png");
+		expect(
+			(wire.observation as Record<string, unknown>).__image_base64,
+		).toBeUndefined();
 		expect(platform.screenshots).toHaveLength(1);
 		expect(platform.settles).toHaveLength(1);
 		expect(platform.settles[0]?.timeoutMs).toBe(3000);

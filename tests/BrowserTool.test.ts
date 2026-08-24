@@ -184,3 +184,17 @@ function tinyPng(): Buffer {
 		"base64",
 	);
 }
+
+describe("BrowserTool wire payload", () => {
+	it("hoists the latest screenshot image to the top level", async () => {
+		const platform = new FakeBrowserPlatform();
+		const tool = new BrowserTool(new BrowserRuntime({ platform }));
+		const result = await tool.execute(
+			{ actions: [{ action: "screenshot" }] },
+			makeContext(new AbortController().signal),
+		);
+		const wire = JSON.parse(result.forLLM) as Record<string, unknown>;
+		expect(typeof wire.__image_base64).toBe("string");
+		expect(result.forLLM.split("__image_base64").length - 1).toBe(1);
+	});
+});

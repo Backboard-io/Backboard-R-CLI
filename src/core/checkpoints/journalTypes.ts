@@ -68,6 +68,21 @@ export interface SkipJournalRecord extends JournalRecordBase {
 	size?: number;
 }
 
+/**
+ * Neutralizes an earlier `pre`/`skip` record. Written when a capture's run
+ * lost checkpoint access (moved to the background) after its own record was
+ * already durable: the matching post-image will never be journaled, so the
+ * orphaned pre-image must not stay in the turn's checkpoint or `/undo` would
+ * revert a write the background run went on to complete.
+ */
+export interface RevokeJournalRecord extends JournalRecordBase {
+	type: "revoke";
+	turnId: string;
+	/** `seq` of the record this one drops. */
+	ref: number;
+	path: string;
+}
+
 /** Closes a checkpoint group; only finalized, non-empty groups are listed. */
 export interface FinalizeJournalRecord extends JournalRecordBase {
 	type: "finalize";
@@ -109,6 +124,7 @@ export type JournalRecord =
 	| PreImageJournalRecord
 	| PostImageJournalRecord
 	| SkipJournalRecord
+	| RevokeJournalRecord
 	| FinalizeJournalRecord
 	| UndoStartJournalRecord
 	| UndoFileJournalRecord

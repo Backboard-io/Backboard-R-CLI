@@ -16,6 +16,9 @@ function makeRecorder(): { recorder: CheckpointRecorder; calls: string[] } {
 		recordPostImage: async () => {
 			calls.push("post");
 		},
+		revokeCapture: async () => {
+			calls.push("revoke");
+		},
 		revertToolCall: async () => {
 			calls.push("revert");
 		},

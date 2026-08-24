@@ -2,11 +2,13 @@ import { describe, expect, it } from "bun:test";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { ModelRef } from "../src/config/defaults.ts";
 import { AgentTraceContext } from "../src/core/agent/AgentTraceStore.ts";
 import {
 	SubAgentRunner,
 	type SubAgentRunParams,
 } from "../src/core/agent/SubAgentRunner.ts";
+import type { AgentDefinition } from "../src/core/agents/AgentDefinition.ts";
 import { EventBus } from "../src/core/bus/EventBus.ts";
 import type { OpenAITool } from "../src/core/tools/schema.ts";
 import type { Tool } from "../src/core/tools/Tool.ts";
@@ -91,6 +93,14 @@ class RepeatingToolCallClient extends CompletingClient {
 	}
 }
 
+const TEST_DEFINITION: AgentDefinition = {
+	name: "worker",
+	description: "test worker",
+	mode: "worker",
+	systemPrompt: "you are a sub-agent",
+	source: "built-in",
+};
+
 function runnerWith(client: BackboardClient, tools: Tool[]): SubAgentRunner {
 	return new SubAgentRunner({
 		client,
@@ -98,10 +108,68 @@ function runnerWith(client: BackboardClient, tools: Tool[]): SubAgentRunner {
 		memory: "off",
 		memoryProfile: "code",
 		getThinking: async () => undefined,
-		systemPrompt: "you are a sub-agent",
 		toolFactory: () => tools,
 	});
 }
+
+describe("SubAgentRunner model override", () => {
+	it("resolves thinking and tool policy from the definition's model", async () => {
+		const pinned = { provider: "moonshot", model: "kimi-k3" };
+		const thinkingModels: ModelRef[] = [];
+		const toolGateModels: ModelRef[] = [];
+		const runner = new SubAgentRunner({
+			client: new CompletingClient(),
+			getModel: () => TEST_MODEL,
+			memory: "off",
+			memoryProfile: "code",
+			getThinking: async (model) => {
+				thinkingModels.push(model);
+				return undefined;
+			},
+			toolFactory: () => [new TestTool({ name: "Read", readOnly: true })],
+			isToolEnabled: (_name, model) => {
+				toolGateModels.push(model);
+				return true;
+			},
+		});
+
+		await runner.run({
+			prompt: "work",
+			depth: 1,
+			definition: { ...TEST_DEFINITION, model: pinned },
+			parentCwd: process.cwd(),
+			parentSignal: new AbortController().signal,
+		});
+
+		expect(thinkingModels).toEqual([pinned]);
+		expect(toolGateModels.every((model) => model === pinned)).toBe(true);
+	});
+
+	it("falls back to the session model when the definition pins none", async () => {
+		const thinkingModels: ModelRef[] = [];
+		const runner = new SubAgentRunner({
+			client: new CompletingClient(),
+			getModel: () => TEST_MODEL,
+			memory: "off",
+			memoryProfile: "code",
+			getThinking: async (model) => {
+				thinkingModels.push(model);
+				return undefined;
+			},
+			toolFactory: () => [],
+		});
+
+		await runner.run({
+			prompt: "work",
+			depth: 1,
+			definition: TEST_DEFINITION,
+			parentCwd: process.cwd(),
+			parentSignal: new AbortController().signal,
+		});
+
+		expect(thinkingModels).toEqual([TEST_MODEL]);
+	});
+});
 
 describe("SubAgentRunner", () => {
 	it("returns only the sub-agent's final report and aggregates usage", async () => {
@@ -113,6 +181,7 @@ describe("SubAgentRunner", () => {
 		const result = await runner.run({
 			prompt: "summarize the module\n\nReturn one sentence.",
 			depth: 1,
+			definition: TEST_DEFINITION,
 			parentCwd: process.cwd(),
 			parentSignal: new AbortController().signal,
 		});
@@ -123,8 +192,12 @@ describe("SubAgentRunner", () => {
 		expect(client.messageRequests[0]?.content).toBe(
 			"summarize the module\n\nReturn one sentence.",
 		);
-		expect(client.messageRequests[0]?.system_prompt).toBe(
+		expect(client.messageRequests[0]?.system_prompt).toStartWith(
 			"you are a sub-agent",
+		);
+		// The report contract is appended so an agent file cannot drop it.
+		expect(client.messageRequests[0]?.system_prompt).toContain(
+			"the parent receives that message and nothing else",
 		);
 	});
 
@@ -156,6 +229,7 @@ describe("SubAgentRunner", () => {
 		await runner.run({
 			prompt: "x",
 			depth: 2,
+			definition: TEST_DEFINITION,
 			parentCwd: process.cwd(),
 			parentSignal: new AbortController().signal,
 		});
@@ -170,6 +244,7 @@ describe("SubAgentRunner", () => {
 		await runner.run({
 			prompt: "x",
 			depth: 1,
+			definition: TEST_DEFINITION,
 			parentCwd: process.cwd(),
 			parentSignal: controller.signal,
 		});
@@ -189,6 +264,7 @@ describe("SubAgentRunner", () => {
 		const result = await runner.run({
 			prompt: "keep using tools",
 			depth: 1,
+			definition: TEST_DEFINITION,
 			parentCwd: process.cwd(),
 			parentSignal: new AbortController().signal,
 		});
@@ -208,6 +284,7 @@ describe("SubAgentRunner", () => {
 			await runner.run({
 				prompt: "summarize",
 				depth: 1,
+				definition: TEST_DEFINITION,
 				parentCwd: dir,
 				parentSignal: new AbortController().signal,
 				trace: {
@@ -272,6 +349,7 @@ describe("SubAgentRunner", () => {
 		const result = await runner.run({
 			prompt: "track child work",
 			depth: 1,
+			definition: TEST_DEFINITION,
 			parentCwd: process.cwd(),
 			parentSignal: new AbortController().signal,
 			parentBus,
@@ -303,6 +381,7 @@ describe("SubAgentRunner", () => {
 			{
 				prompt: "x",
 				depth: 1,
+				definition: TEST_DEFINITION,
 				parentCwd: process.cwd(),
 				parentSignal: controller.signal,
 				parentBus,

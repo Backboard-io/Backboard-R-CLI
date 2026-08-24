@@ -1,3 +1,4 @@
+import type { AskUserFn } from "../tools/ToolContext.ts";
 import type { PermissionMode } from "./PermissionMode.ts";
 import type { RuleSet } from "./PermissionRules.ts";
 
@@ -24,6 +25,8 @@ export interface PermissionCheckContext {
 export interface PermissionContext {
 	mode: PermissionMode;
 	rules: RuleSet;
-	/** False in headless mode and sub-agents: an `ask` auto-denies. */
+	/** False in headless mode and sub-agents: an `ask` auto-denies unless `escalate` yields a prompt. */
 	interactive: boolean;
+	escalate?: () => AskUserFn | null;
+	promptHost?: PermissionContext;
 }

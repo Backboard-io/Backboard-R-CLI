@@ -5,6 +5,7 @@ import type {
 	PermissionCheckContext,
 	PermissionDecision,
 } from "../permissions/types.ts";
+import type { AgentMode } from "./AgentToolOutput.ts";
 import { toAgentToolName } from "./names.ts";
 import { type OpenAITool, toOpenAITool } from "./schema.ts";
 import type { ToolContext } from "./ToolContext.ts";
@@ -106,6 +107,10 @@ export abstract class Tool<I = unknown, O = unknown> {
 	 * the caller, so return the raw human-readable summary.
 	 */
 	summarizeInput(_input: I): string | undefined {
+		return undefined;
+	}
+
+	agentModeForInput(_input: I): AgentMode | undefined {
 		return undefined;
 	}
 

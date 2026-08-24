@@ -24,8 +24,9 @@ function normalizedPathRules(
  * Deny/ask rules sit above the bypass gate on purpose: no mode can skip them.
  *
  * Manual mode prompts for reads too, but only where a human can answer: a
- * sub-agent or headless run has no prompt, so an "ask" there is a hard denial.
- * Those keep the read-only shortcut instead of failing every Read and Grep.
+ * headless run has no prompt, so an "ask" there is a hard denial, and a
+ * foreground sub-agent escalates its asks to the parent's prompt instead.
+ * Both keep the read-only shortcut instead of failing every Read and Grep.
  */
 export function decidePermission(
 	tool: Tool,

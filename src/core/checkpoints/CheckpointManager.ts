@@ -4,6 +4,7 @@ import {
 	sessionPathsForRoot,
 } from "../session/SessionStore.ts";
 import {
+	type CapturedEntry,
 	type CheckpointCallContext,
 	type CheckpointRecorder,
 	CheckpointStore,
@@ -98,6 +99,10 @@ export class CheckpointManager implements CheckpointRecorder {
 		contentIfInMemory?: Uint8Array,
 	): Promise<void> {
 		return this.active.recordPostImage(absPath, ctx, contentIfInMemory);
+	}
+
+	revokeCapture(entry: CapturedEntry): Promise<void> {
+		return this.active.revokeCapture(entry);
 	}
 
 	revertToolCall(toolCallId: string): Promise<void> {

@@ -152,6 +152,7 @@ interface LoopOptions {
 	maxIterations?: number;
 	maxLLMCalls?: number;
 	timeoutSummaryMs?: number;
+	instructions?: string;
 }
 
 function loopWith(
@@ -411,5 +412,53 @@ describe("RLMLoop", () => {
 
 		expect(result.report).toContain("llm_query budget exceeded (2)");
 		expect(client.requests).toHaveLength(1);
+	});
+});
+
+describe("RLMLoop custom agent instructions", () => {
+	it("prepends them to the action prompt", async () => {
+		const client = new ScriptedClient([response("```js\nSUBMIT('done')\n```")]);
+		const executor = new FakeExecutor([
+			{ ok: true, stdout: "", stderr: "", submitted: "done" },
+		]);
+		await loopWith(client, executor, {
+			instructions: "You are a schema auditor. Answer in one line.",
+		}).run(runParams("audit this"));
+
+		expect(client.requests[0]?.content).toStartWith(
+			"You are a schema auditor. Answer in one line.\n\n",
+		);
+	});
+
+	it("keeps them out of llm_query sub-calls the REPL makes", async () => {
+		const client = new ScriptedClient([
+			response(
+				"```js\nconst r = await llm_query('inner question'); SUBMIT(r)\n```",
+			),
+			response("LEAF ANSWER"),
+		]);
+		await loopWith(client, new LocalReplExecutor(), {
+			instructions: "You are a schema auditor.",
+		}).run(runParams("audit this"));
+
+		expect(client.requests[1]?.content).toBe("inner question");
+	});
+
+	it("stops at the agent's configured iteration count", async () => {
+		const client = new ScriptedClient([
+			response("```js\nprint(1)\n```"),
+			response("the extracted answer"),
+		]);
+		const executor = new FakeExecutor([{ ok: true, stdout: "1", stderr: "" }]);
+		const result = await loopWith(client, executor, {
+			maxIterations: 1,
+			instructions: "You are a schema auditor.",
+		}).run(runParams("audit this"));
+
+		expect(result.rounds).toBe(1);
+		expect(result.report).toBe("the extracted answer");
+		expect(client.requests[1]?.content).toStartWith(
+			"You are a schema auditor.",
+		);
 	});
 });

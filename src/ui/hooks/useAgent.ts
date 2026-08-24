@@ -30,7 +30,7 @@ type Action =
 	| { type: "hydrate"; messages: readonly Message[] }
 	| { type: "notice"; text: string; level: "info" | "warning" | "error" };
 
-function rootReducer(state: AppState, action: Action): AppState {
+export function rootReducer(state: AppState, action: Action): AppState {
 	switch (action.type) {
 		case "model":
 			return { ...state, model: action.label };
@@ -40,6 +40,7 @@ function rootReducer(state: AppState, action: Action): AppState {
 				transcript: [],
 				todos: [],
 				usage: {},
+				backgroundAgents: [],
 				render: {
 					staticItems: [],
 					liveItems: [],
@@ -57,6 +58,7 @@ function rootReducer(state: AppState, action: Action): AppState {
 				todos: todosFromMessages(action.messages),
 				usage: {},
 				pendingAsk: null,
+				backgroundAgents: [],
 				render: {
 					staticItems: items,
 					liveItems: [],

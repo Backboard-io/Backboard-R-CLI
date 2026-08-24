@@ -12,6 +12,7 @@ import type { ToolContext } from "../src/core/tools/ToolContext.ts";
 import { initialState } from "../src/state/AppState.ts";
 import { reduce } from "../src/state/Store.ts";
 import { AgentTool } from "../src/tools/AgentTool.tsx";
+import { rootReducer } from "../src/ui/hooks/useAgent.ts";
 
 const sleep = (ms: number): Promise<void> =>
 	new Promise((resolve) => setTimeout(resolve, ms));
@@ -273,5 +274,27 @@ describe("background agents in AppState", () => {
 			run: { ...run, status: "completed", rounds: 3, finishedAt: Date.now() },
 		} satisfies AgentEvent);
 		expect(state.backgroundAgents).toEqual([]);
+	});
+
+	it("drops rows when the session is cleared or hydrated", () => {
+		const run = {
+			id: "bg_2",
+			agent: "watcher",
+			label: "watch the build",
+			status: "running" as const,
+			startedAt: Date.now(),
+			rounds: 0,
+		};
+		let state = initialState("gpt-test");
+		state = reduce(state, {
+			type: "agent:background_started",
+			run,
+		} satisfies AgentEvent);
+		expect(state.backgroundAgents).toHaveLength(1);
+
+		expect(rootReducer(state, { type: "clear" }).backgroundAgents).toEqual([]);
+		expect(
+			rootReducer(state, { type: "hydrate", messages: [] }).backgroundAgents,
+		).toEqual([]);
 	});
 });

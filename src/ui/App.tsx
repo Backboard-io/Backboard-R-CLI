@@ -983,6 +983,15 @@ export function App({
 	);
 	const applyExpertSelection = useCallback(
 		async (selectedModel: ModelInfo, choice: ThinkingChoice) => {
+			if (controller.hasActiveWork) {
+				agent.notice(
+					"Finish or cancel the current turn before changing expert mode.",
+					"error",
+				);
+				setPendingModel(null);
+				setMode("settings");
+				return;
+			}
 			config.setExpertMode({
 				enabled: true,
 				model: {
@@ -1010,7 +1019,7 @@ export function App({
 				setMode("settings");
 			}
 		},
-		[agent, config],
+		[agent, config, controller],
 	);
 	const applyModelSelection = useCallback(
 		async (selectedModel: ModelInfo, choice: ThinkingChoice) => {
@@ -1349,6 +1358,13 @@ export function App({
 	// Enter on the Expert row turns it off when on, and opens the model picker
 	// when off. The pick is remembered, so an off/on cycle re-picks by choice.
 	const toggleExpertMode = useCallback(() => {
+		if (controller.hasActiveWork) {
+			agent.notice(
+				"Finish or cancel the current turn before changing expert mode.",
+				"error",
+			);
+			return;
+		}
 		if (!config.isExpertModeEnabled) {
 			openModelPicker("expert");
 			return;
@@ -1364,7 +1380,7 @@ export function App({
 			);
 		});
 		forceSettingsRender();
-	}, [agent, config, openModelPicker]);
+	}, [agent, config, controller, openModelPicker]);
 	const openSettingsRow = useCallback(
 		(id: SettingsOpenId) => {
 			if (id === "memory") {

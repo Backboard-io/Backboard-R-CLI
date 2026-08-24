@@ -79,14 +79,13 @@ export async function resolveToolPermission(
 	}
 
 	// behavior === "ask"
-	if (!pctx.interactive) {
-		return {
-			allowed: false,
-			denialReason: `Permission required for ${tool.displayName} — permission prompts are unavailable in this context.`,
-		};
-	}
+	const unavailable: GateResult = {
+		allowed: false,
+		denialReason: `Permission required for ${tool.displayName} — permission prompts are unavailable in this context.`,
+	};
+	if (!pctx.interactive && !pctx.escalate?.()) return unavailable;
 
-	return await withPromptLock(pctx, ctx.signal, async () => {
+	return await withPromptLock(pctx.promptHost ?? pctx, ctx.signal, async () => {
 		// Another prompt may have persisted an allow rule while this call waited.
 		// Re-evaluate so a parallel batch does not prompt redundantly.
 		decision = decidePermission(tool, input, pctx, ctx.cwd);
@@ -105,6 +104,8 @@ export async function resolveToolPermission(
 			input as Parameters<typeof tool.permissionHint>[0],
 		);
 		const question = hint ? `${base} ${hint}` : base;
+		const prompt = pctx.interactive ? ctx.askUser : pctx.escalate?.();
+		if (!prompt) return unavailable;
 		throwIfAborted(ctx.signal);
 		// Compute the rule up front so the "always" option can disclose its scope.
 		const raw = suggestRule(
@@ -114,12 +115,7 @@ export async function resolveToolPermission(
 				input as Parameters<typeof tool.permissionContentIsPaths>[0],
 			),
 		);
-		const answer = await promptForPermission(
-			question,
-			raw,
-			ctx.askUser,
-			ctx.signal,
-		);
+		const answer = await promptForPermission(question, raw, prompt, ctx.signal);
 
 		if (answer === "deny") {
 			return {

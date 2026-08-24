@@ -16,6 +16,7 @@ import type { PermissionContext } from "../permissions/types.ts";
 import type { SpawnedAgent } from "../tools/AgentToolOutput.ts";
 import type { Tool } from "../tools/Tool.ts";
 import type {
+	AskUserFn,
 	BackgroundChainState,
 	ToolTraceContext,
 } from "../tools/ToolContext.ts";
@@ -75,6 +76,7 @@ export interface SubAgentRunParams {
 	 */
 	checkpoints?: CheckpointRecorder;
 	parentPermissions?: PermissionContext;
+	parentAskUser?: AskUserFn;
 	/** This run itself was launched in the background. */
 	chainInBackground?: boolean;
 	/**

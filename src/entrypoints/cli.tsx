@@ -346,6 +346,7 @@ async function main(): Promise<void> {
 	// is still inspectable via /mcp; only the noisy startup emission is dropped.
 	const agentCatalog = await discoverAgents({ cwd: config.cwd });
 	const startupWarnings = [
+		...config.startupWarnings,
 		...hookConfig.warnings,
 		...permissionWarnings,
 		...agentCatalog.warnings,

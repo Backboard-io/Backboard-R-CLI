@@ -141,6 +141,7 @@ export class SubAgentRunner {
 		// Closes over locals, not `params`, so the chain link a descendant keeps
 		// does not pin this run's prompt and permissions.
 		let handedOff = false;
+		const parentPermissions = params.parentPermissions;
 		const launchedInBackground = params.chainInBackground === true;
 		const backgroundChain: BackgroundChainState = {
 			get inBackground() {
@@ -167,11 +168,23 @@ export class SubAgentRunner {
 			trace: params.trace?.context,
 			lsp: this.deps.lsp,
 			checkpoints,
-			// interactive:false so a sub-agent "ask" auto-denies. Fall back to a
-			// locked-down context (not undefined) so a missing parent can't
-			// disable the gate.
-			permissions: params.parentPermissions
-				? { ...params.parentPermissions, interactive: false }
+			// interactive:false keeps the non-interactive read-only shortcut; an
+			// "ask" escalates to the interactive ancestor's prompt while the
+			// chain is foreground. Fall back to a locked-down context (not
+			// undefined) so a missing parent can't disable the gate.
+			permissions: parentPermissions
+				? {
+						...parentPermissions,
+						interactive: false,
+						escalate: () => {
+							if (backgroundChain.inBackground) return null;
+							if (parentPermissions.interactive) {
+								return params.parentAskUser ?? null;
+							}
+							return parentPermissions.escalate?.() ?? null;
+						},
+						promptHost: parentPermissions.promptHost ?? parentPermissions,
+					}
 				: { mode: "manual", rules: emptyRuleSet(), interactive: false },
 		};
 

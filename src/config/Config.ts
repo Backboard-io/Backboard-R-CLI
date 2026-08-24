@@ -92,6 +92,7 @@ export class Config {
 	private expertThinking: ThinkingIntent | null | undefined;
 	private readonly currentFinalVerificationNudge: boolean;
 	private readonly excludedToolNames: string[];
+	private readonly configWarnings: string[] = [];
 	private readonly persistedConfigHomeDir: string | undefined;
 
 	constructor(options: ConfigOptions = {}) {
@@ -155,12 +156,27 @@ export class Config {
 		this.currentFinalVerificationNudge =
 			this.flags.finalVerification ?? DEFAULTS.finalVerificationNudge;
 		const expert = persistedConfig.expert;
-		this.expertEnabled = expert?.enabled ?? false;
-		this.expertModelRef = expert?.model ?? null;
-		this.expertModelProfile = expert?.model
-			? resolveModelProfile(expert.model)
+		const expertModel = expert?.model ?? null;
+		const expertBackendMissing =
+			expert?.enabled === true &&
+			expertModel !== null &&
+			this.auth.backboard === null &&
+			!this.auth.providerKeys.some(
+				(entry) => entry.provider === expertModel.provider,
+			);
+		this.expertEnabled = (expert?.enabled ?? false) && !expertBackendMissing;
+		this.expertModelRef = expertModel;
+		this.expertModelProfile = expertModel
+			? resolveModelProfile(expertModel)
 			: null;
 		this.expertThinking = expert?.thinking;
+		if (expertBackendMissing && expertModel) {
+			this.configWarnings.push(
+				`Expert mode is off: no enabled API key for its saved model ${formatModel(
+					expertModel,
+				)}. Pick a reachable model in /settings to turn it back on.`,
+			);
+		}
 		this.notifyEnabled = persistedConfig.notify ?? false;
 		this.verboseEnabled = persistedConfig.verbose ?? true;
 		this.excludedToolNames = parseExcludedTools(this.flags.excludedTools).map(
@@ -446,6 +462,10 @@ export class Config {
 				this.persistedConfigHomeDir,
 			);
 		});
+	}
+
+	get startupWarnings(): readonly string[] {
+		return this.configWarnings;
 	}
 
 	get hasBackboardAuth(): boolean {

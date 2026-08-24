@@ -309,6 +309,7 @@ export class AgentTool extends Tool<AgentToolInput, AgentToolOutput> {
 					}
 				: {}),
 			parentPermissions: ctx.permissions,
+			parentAskUser: ctx.askUser,
 			trace: workerTrace,
 			// A run launched into the background, or already inside one, is the
 			// background chain from its children's point of view.

@@ -45,6 +45,12 @@ export interface ConfigOptions {
 	env?: BackboardEnv;
 	argv?: string[];
 	homeDir?: string;
+	/**
+	 * A validated local resume may bootstrap without credentials so the user
+	 * can reopen it and add/re-enable its provider key via /keys.
+	 */
+	resumeModel?: ModelRef;
+	allowUnauthenticatedResume?: boolean;
 }
 
 /** Placeholder env used when the run authenticates with provider keys only. */
@@ -97,7 +103,10 @@ export class Config {
 		if (options.env) {
 			// An injected env is an explicit Backboard credential (tests, evals).
 			this.auth = { ...this.auth, backboard: options.env };
-		} else if (!hasAnyCredentials(this.auth)) {
+		} else if (
+			!hasAnyCredentials(this.auth) &&
+			!options.allowUnauthenticatedResume
+		) {
 			throw new Error(NO_CREDENTIALS_MESSAGE);
 		}
 		this.env = this.auth.backboard ?? anonymousEnv();
@@ -125,7 +134,10 @@ export class Config {
 				: null;
 		this.currentModel = this.flags.model
 			? parseModel(this.flags.model)
-			: (persistedConfig.model ?? keyOnlyDefault ?? this.profile.model);
+			: (options.resumeModel ??
+				persistedConfig.model ??
+				keyOnlyDefault ??
+				this.profile.model);
 		this.currentModelProfile = resolveModelProfile(this.currentModel);
 		this.currentFormat = this.flags.format
 			? parseOutputFormat(this.flags.format)
@@ -424,6 +436,17 @@ export class Config {
 
 	get hasProviderKeys(): boolean {
 		return this.auth.providerKeys.length > 0;
+	}
+
+	hasProviderKeyFor(provider: string): boolean {
+		return this.auth.providerKeys.some((entry) => entry.provider === provider);
+	}
+
+	get hasBackendForCurrentModel(): boolean {
+		return (
+			this.hasBackboardAuth ||
+			this.hasProviderKeyFor(this.currentModel.provider)
+		);
 	}
 
 	/**

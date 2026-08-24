@@ -1,13 +1,22 @@
 #!/usr/bin/env bun
+import { resolve as resolvePath } from "node:path";
 import { render } from "ink";
-import { NO_CREDENTIALS_MESSAGE } from "../config/auth.ts";
+import { NO_CREDENTIALS_MESSAGE, resolveAuth } from "../config/auth.ts";
 import {
 	APP_COMMAND_NAME,
 	APP_DISPLAY_NAME,
 	APP_VERSION,
 } from "../config/branding.ts";
+import { CliUserError, cliUserErrorMessage } from "../config/CliUserError.ts";
 import { Config } from "../config/Config.ts";
+import { parseOutputFormat } from "../config/defaults.ts";
 import { parseFlags } from "../config/flags.ts";
+import { buildResumeCommand } from "../config/resumeCommand.ts";
+import {
+	canPromptForPermissions,
+	isHeadlessInvocation,
+	parseRequestedResume,
+} from "../config/resumePreflight.ts";
 import { AgentController } from "../core/agent/AgentController.ts";
 import { BackgroundAgentSupervisor } from "../core/agent/BackgroundAgentSupervisor.ts";
 import { discoverAgents } from "../core/agents/discovery.ts";
@@ -44,9 +53,19 @@ import {
 } from "../core/permissions/index.ts";
 import { ClientEventLog } from "../core/session/ClientEventLog.ts";
 import { JsonEventStream } from "../core/session/JsonEventStream.ts";
+import {
+	isLocalResumeId,
+	isRemoteResumeId,
+	resolveLocalResumeBootstrap,
+} from "../core/session/ResumeBootstrap.ts";
+import {
+	lookupResumeEntry,
+	registerResumeIds,
+} from "../core/session/ResumeIndex.ts";
 import { ServerEventLog } from "../core/session/ServerEventLog.ts";
 import { Session } from "../core/session/Session.ts";
 import { SessionLifecycle } from "../core/session/SessionLifecycle.ts";
+import { activateSessionLogs } from "../core/session/SessionLogActivation.ts";
 import {
 	SessionStore,
 	sessionPathsForRoot,
@@ -68,8 +87,13 @@ import { palette } from "../ui/theme/palette.ts";
 import { ThemeProvider } from "../ui/theme/ThemeProvider.tsx";
 import { detectTerminalBg } from "../ui/theme/terminalBg.ts";
 import { createTheme, setTheme } from "../ui/theme/theme.ts";
+import {
+	activateResumeTarget,
+	type ResumeTarget,
+	resolveResumeTarget,
+} from "../ui/utils/resumeSession.ts";
 import { errorMessage } from "../utils/errors.ts";
-import { shortId } from "../utils/id.ts";
+import { isByokThreadId, shortId } from "../utils/id.ts";
 import { pluralize } from "../utils/string.ts";
 
 const HELP = `${APP_DISPLAY_NAME} · coding agent
@@ -92,6 +116,7 @@ Options:
   --permission-mode <mode>   manual | acceptEdits | auto (prompt only for risky) | bypass (default: manual)
   --lsp                      Enable language-server diagnostics for this run
   --fresh                    Create a new Backboard assistant/thread for this run (isolated)
+  --resume <id>              Resume a Backboard or local BYOK session
   --login                    Sign in with Backboard
   --logout                   Remove saved Backboard credentials
   --help                     Show this help
@@ -119,14 +144,65 @@ async function main(): Promise<void> {
 	}
 	const interactiveRenderConfig = resolveInteractiveRenderConfig();
 
+	let earlyFormat: ReturnType<typeof parseOutputFormat>;
+	try {
+		earlyFormat = parseOutputFormat(earlyFlags.format ?? "default");
+	} catch (error) {
+		throw new CliUserError(errorMessage(error));
+	}
+	const requestedResume = parseRequestedResume(earlyFlags.resume);
+	const indexedLocalResume =
+		requestedResume && isLocalResumeId(requestedResume)
+			? await lookupResumeEntry(requestedResume)
+			: null;
+	const resumeCwd = resolvePath(
+		earlyFlags.cwd ?? indexedLocalResume?.cwd ?? process.cwd(),
+	);
+	const runtimeArgv =
+		earlyFlags.cwd === undefined && indexedLocalResume
+			? [...argv, "--cwd", resumeCwd]
+			: argv;
+	const localResume = await resolveLocalResumeBootstrap(
+		resumeCwd,
+		earlyFlags.resume,
+		indexedLocalResume?.sessionId,
+	);
+	if (requestedResume && isLocalResumeId(requestedResume) && !localResume) {
+		throw new CliUserError(
+			`Local session "${requestedResume}" was not found in ${resumeCwd}. Run the command from its original workspace or pass --cwd <workspace>.`,
+		);
+	}
+	const remoteResumeId = isRemoteResumeId(requestedResume)
+		? requestedResume
+		: !localResume &&
+				indexedLocalResume?.threadId &&
+				!isByokThreadId(indexedLocalResume.threadId)
+			? indexedLocalResume.threadId
+			: undefined;
+	if (remoteResumeId && resolveAuth().backboard === null) {
+		if (isHeadlessInvocation(earlyFlags, earlyFormat)) {
+			throw new CliUserError(
+				`Backboard sign-in is required to resume remote session "${remoteResumeId}".`,
+			);
+		}
+		const didLogin = await runLoginCommand();
+		if (!didLogin) {
+			process.exitCode = 1;
+			return;
+		}
+	}
 	let config: Config;
 	while (true) {
 		try {
-			config = new Config({ argv });
+			config = new Config({
+				argv: runtimeArgv,
+				resumeModel: localResume?.model,
+				allowUnauthenticatedResume: localResume !== null,
+			});
 			break;
 		} catch (err) {
 			const error = err instanceof Error ? err : String(err);
-			if (shouldShowAuthScreen(error, earlyFlags)) {
+			if (shouldShowAuthScreen(error, earlyFlags, earlyFormat)) {
 				const didLogin = await runAuthScreen(interactiveRenderConfig);
 				if (!didLogin) return;
 				continue;
@@ -134,6 +210,19 @@ async function main(): Promise<void> {
 			process.stderr.write(`${errorMessage(err)}\n`);
 			process.exit(1);
 		}
+	}
+	const missingResumeBackend =
+		localResume !== null &&
+		(localResume.kind === "byok"
+			? !config.hasProviderKeyFor(config.model.provider)
+			: !config.hasBackendForCurrentModel);
+	if (
+		missingResumeBackend &&
+		isHeadlessInvocation(config.flags, config.format)
+	) {
+		throw new CliUserError(
+			`No backend can serve resumed model ${config.modelString}. Sign in with Backboard or enable its provider key before using --print or --format json.`,
+		);
 	}
 
 	// Rewrites a pre-encryption keys.json in place. Best-effort: a read-only or
@@ -150,19 +239,30 @@ async function main(): Promise<void> {
 		);
 	}
 
-	const sessionId = shortId("sess");
+	const sessionId = localResume?.sessionId ?? shortId("sess");
 	const store = new SessionStore(sessionId, config.cwd);
-	await store.init({
-		sessionId,
-		createdAt: new Date().toISOString(),
+	if (localResume) {
+		await store.open();
+	} else {
+		await store.init({
+			sessionId,
+			createdAt: new Date().toISOString(),
+			cwd: config.cwd,
+			model: config.modelString,
+			profile: config.profile.name,
+		});
+	}
+	await registerResumeIds({
 		cwd: config.cwd,
-		model: config.modelString,
-		profile: config.profile.name,
-	});
+		sessionId,
+	}).catch(() => undefined);
 
 	const bus = new EventBus();
 	const clientLog = new ClientEventLog(sessionId, store.paths.clientLog);
 	const serverLog = new ServerEventLog(sessionId, store.paths.serverLog);
+	if (localResume) {
+		await Promise.all([clientLog.initialize(), serverLog.initialize()]);
+	}
 	clientLog.attach(bus);
 	// A crash mid-/undo leaves its write-ahead marker in the crashed session's
 	// journal, and every launch mints a fresh session dir — so follow the
@@ -220,11 +320,11 @@ async function main(): Promise<void> {
 	// Both --print and --format json run through runHeadless, which has no UI to
 	// answer an input:request. Anything that asks there would hang forever, so
 	// the gate must know there is nobody to prompt.
-	const headless = config.flags.print !== undefined || config.format === "json";
+	const headless = isHeadlessInvocation(config.flags, config.format);
 	const permissions = buildPermissionContext(
 		config.cwd,
 		config.flags.permissionMode,
-		!headless,
+		canPromptForPermissions(config.flags, config.format),
 	);
 	// Must go through startupWarnings (rendered by App/headless), not a pre-render
 	// bus.emit — the bus has no subscribers yet and doesn't replay.
@@ -236,6 +336,11 @@ async function main(): Promise<void> {
 				]
 			: [];
 	const renderWarnings = headless ? [] : interactiveRenderConfig.warnings;
+	const resumeWarnings = missingResumeBackend
+		? [
+				`Session resumed, but no backend can serve ${config.modelString}. Use /keys, /login, or /model before sending a message.`,
+			]
+		: [];
 	// MCP init warnings (unset env vars, skipped/failed servers) are deliberately
 	// kept out of the startup surface — they cluttered every launch. Server status
 	// is still inspectable via /mcp; only the noisy startup emission is dropped.
@@ -245,6 +350,7 @@ async function main(): Promise<void> {
 		...permissionWarnings,
 		...agentCatalog.warnings,
 		...renderWarnings,
+		...resumeWarnings,
 	];
 	for (const warning of startupWarnings) {
 		bus.emit({ type: "system:warning", message: warning });
@@ -339,25 +445,35 @@ async function main(): Promise<void> {
 		checkpoints,
 		store,
 		async (activeSessionId, paths) => {
-			await Promise.all([
-				clientLog.activate(activeSessionId, paths.clientLog).catch((error) =>
-					bus.emit({
-						type: "system:warning",
-						message: `Failed to rotate the client session log: ${errorMessage(error)}`,
-					}),
-				),
-				serverLog.activate(activeSessionId, paths.serverLog).catch((error) =>
-					bus.emit({
-						type: "system:warning",
-						message: `Failed to rotate the server session log: ${errorMessage(error)}`,
-					}),
-				),
-			]);
+			const previous = sessionLifecycle.current();
+			const previousPaths = sessionPathsForRoot(previous.sessionRoot);
+			await activateSessionLogs({
+				clientLog,
+				serverLog,
+				next: {
+					sessionId: activeSessionId,
+					clientLog: paths.clientLog,
+					serverLog: paths.serverLog,
+				},
+				previous: {
+					sessionId: previous.sessionId,
+					clientLog: previousPaths.clientLog,
+					serverLog: previousPaths.serverLog,
+				},
+			});
 			jsonStream?.activate(activeSessionId);
 			hookController.setSessionId(activeSessionId);
 		},
 	);
 	await sessionLifecycle.initialize();
+	const detachResumeIndex = bus.on("session:thread", (event) => {
+		const active = sessionLifecycle.current();
+		void registerResumeIds({
+			cwd: config.cwd,
+			sessionId: active.sessionId,
+			threadId: event.threadId,
+		}).catch(() => undefined);
+	});
 	const controller = new AgentController({
 		config,
 		bus,
@@ -396,6 +512,7 @@ async function main(): Promise<void> {
 			backgroundSupervisor.disableNotifier();
 			backgroundSupervisor.cancelAll();
 			controller.cancel({ clearQueue: true });
+			detachResumeIndex();
 			await controller.dispose();
 			await lsp.shutdown();
 			await mcpManager.close();
@@ -408,6 +525,31 @@ async function main(): Promise<void> {
 			await sessionLifecycle.dispose();
 		}
 	};
+	let initialResumeTarget: ResumeTarget | undefined;
+	if (config.flags.resume !== undefined) {
+		try {
+			initialResumeTarget = await resolveResumeTarget(
+				client,
+				config.cwd,
+				config.flags.resume,
+				indexedLocalResume,
+			);
+			await activateResumeTarget(initialResumeTarget, {
+				config,
+				controller,
+				onResumeLocalSession: (id) => sessionLifecycle.resume(id),
+			});
+			const active = sessionLifecycle.current();
+			await registerResumeIds({
+				cwd: config.cwd,
+				sessionId: active.sessionId,
+				threadId: controller.threadId,
+			}).catch(() => undefined);
+		} catch (error) {
+			await flush();
+			throw error;
+		}
+	}
 
 	// Fire SessionStart at init so it runs even for prompt-less sessions.
 	await controller.start();
@@ -455,11 +597,13 @@ async function main(): Promise<void> {
 				client={client}
 				attachments={attachmentManager}
 				startupWarnings={startupWarnings}
+				initialResumeTarget={initialResumeTarget}
 				onLogin={(onDeviceCode) => loginWithBackboardSso({ onDeviceCode })}
 				onLogout={logoutSavedCredentials}
 				onNewSession={() => sessionLifecycle.startNew()}
 				onResumeLocalSession={(sessionId) => sessionLifecycle.resume(sessionId)}
 				onResumeRemoteSession={() => sessionLifecycle.startNew()}
+				getActiveSessionId={() => sessionLifecycle.current().sessionId}
 				onExit={() => {
 					controller.cancel({ clearQueue: true });
 				}}
@@ -471,11 +615,22 @@ async function main(): Promise<void> {
 		maxFps: interactiveRenderConfig.maxFps,
 	});
 
+	let activeId = sessionLifecycle.current().sessionId;
 	try {
 		await instance.waitUntilExit();
 	} finally {
+		const active = sessionLifecycle.current();
+		activeId = active.sessionId;
+		await registerResumeIds({
+			cwd: config.cwd,
+			sessionId: active.sessionId,
+			threadId: controller.threadId,
+		}).catch(() => undefined);
 		await flush();
 	}
+	process.stdout.write(
+		`\nResume this session with: ${buildResumeCommand(argv, activeId, {})}\n`,
+	);
 }
 
 async function runAuthScreen(
@@ -521,9 +676,9 @@ function clearTerminalScreen(): void {
 function shouldShowAuthScreen(
 	err: Error | string,
 	flags: ReturnType<typeof parseFlags>,
+	format: ReturnType<typeof parseOutputFormat>,
 ): boolean {
-	if (flags.print !== undefined || flags.format === "json") return false;
-	if (!process.stdin.isTTY || !process.stdout.isTTY) return false;
+	if (isHeadlessInvocation(flags, format)) return false;
 
 	const message = errorMessage(err);
 	return (
@@ -644,6 +799,8 @@ main().catch((err) => {
 });
 
 function formatFatalError(err: Error | string): string {
+	const userMessage = cliUserErrorMessage(err);
+	if (userMessage !== null) return userMessage;
 	if (err instanceof BackboardError && err.status === 401) {
 		return [
 			"Backboard rejected BACKBOARD_API_KEY (HTTP 401).",

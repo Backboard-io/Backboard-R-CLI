@@ -90,7 +90,13 @@ export class ProviderStreamConsumer {
 		for await (const event of stream) {
 			switch (event.kind) {
 				case "thread":
-					this.session.threadId = event.threadId;
+					if (this.session.threadId !== event.threadId) {
+						this.session.threadId = event.threadId;
+						this.bus.emit({
+							type: "session:thread",
+							threadId: event.threadId,
+						});
+					}
 					break;
 				case "assistant_delta":
 					if (event.text) assistant.appendDelta(event.text);
@@ -164,15 +170,16 @@ function isRetryableProviderStreamFailure(error: unknown): boolean {
 
 async function waitForRetry(ms: number, signal: AbortSignal): Promise<void> {
 	if (ms <= 0) return;
+	if (signal.aborted) throw new AbortError();
 	await new Promise<void>((resolve, reject) => {
-		const timeout = setTimeout(resolve, ms);
-		signal.addEventListener(
-			"abort",
-			() => {
-				clearTimeout(timeout);
-				reject(new AbortError());
-			},
-			{ once: true },
-		);
+		const onAbort = () => {
+			clearTimeout(timeout);
+			reject(new AbortError());
+		};
+		const timeout = setTimeout(() => {
+			signal.removeEventListener("abort", onAbort);
+			resolve();
+		}, ms);
+		signal.addEventListener("abort", onAbort, { once: true });
 	});
 }

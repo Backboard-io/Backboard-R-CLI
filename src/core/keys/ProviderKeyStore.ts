@@ -1,11 +1,10 @@
-import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { chmod, mkdir, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { BACKBOARD_CONFIG_DIR_NAME } from "../../config/paths.ts";
 import { acquireFileLease } from "../../utils/FileLease.ts";
-import { renameOverPreservingDestination } from "../../utils/fs.ts";
+import { writePrivateFileAtomic } from "../../utils/fs.ts";
 import type { JsonValue } from "../../utils/JsonTypes.ts";
 import {
 	decryptSecret,
@@ -187,24 +186,14 @@ async function saveProviderKeys(
 
 	await mkdir(dir, { recursive: true, mode: 0o700 });
 	await chmod(dir, 0o700).catch(() => undefined);
-	const temporary = `${file}.tmp-${process.pid}-${Date.now()}-${randomUUID()}`;
-	try {
-		await writeFile(
-			temporary,
-			`${JSON.stringify(
-				{ version: CURRENT_VERSION, salt: activeSalt, keys: encrypted },
-				null,
-				2,
-			)}\n`,
-			{ mode: 0o600 },
-		);
-		await chmod(temporary, 0o600).catch(() => undefined);
-		await renameOverPreservingDestination(temporary, file);
-		await chmod(file, 0o600).catch(() => undefined);
-	} catch (error) {
-		await rm(temporary, { force: true }).catch(() => undefined);
-		throw error;
-	}
+	await writePrivateFileAtomic(
+		file,
+		`${JSON.stringify(
+			{ version: CURRENT_VERSION, salt: activeSalt, keys: encrypted },
+			null,
+			2,
+		)}\n`,
+	);
 
 	return file;
 }

@@ -46,6 +46,12 @@ describe("parseCommand", () => {
 
 	it("parses sessions", () => {
 		expect(parseCommand("/sessions")).toEqual({ type: "sessions" });
+		expect(parseCommand("/session")).toEqual({ type: "sessions" });
+		expect(parseCommand("/resume")).toEqual({ type: "sessions" });
+		expect(parseCommand("/resume thread_123")).toEqual({
+			type: "sessions",
+			id: "thread_123",
+		});
 	});
 
 	it("parses logout", () => {

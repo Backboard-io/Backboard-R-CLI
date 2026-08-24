@@ -36,11 +36,13 @@ const actionNameSchema = z.enum([
 const elementTarget = z.object({ elementId: z.string().min(1) });
 const pointTarget = z.object({ x: z.number(), y: z.number() });
 const targetSchema = z.union([elementTarget, pointTarget]);
+// `.positive()` serializes as `exclusiveMinimum: true` (OpenAPI 3.0 style),
+// which strict providers such as xAI reject; `.min(1)` emits a plain minimum.
 const regionSchema = z.object({
 	x: z.number(),
 	y: z.number(),
-	width: z.number().positive(),
-	height: z.number().positive(),
+	width: z.number().min(1),
+	height: z.number().min(1),
 });
 const keySchema = z.union([
 	z.string().min(1),

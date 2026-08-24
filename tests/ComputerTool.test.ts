@@ -27,6 +27,7 @@ import { ToolRegistry } from "../src/core/tools/ToolRegistry.ts";
 import { getSystemPrompt } from "../src/prompts/system/index.tsx";
 import { BrowserTool } from "../src/tools/BrowserTool.tsx";
 import { ComputerTool } from "../src/tools/ComputerTool.tsx";
+import { createDefaultTools } from "../src/tools/index.ts";
 import { ReadTool } from "../src/tools/ReadTool.tsx";
 import { parseCommand } from "../src/ui/commands/index.ts";
 import { makeContext } from "./helpers.ts";
@@ -235,6 +236,9 @@ describe("ComputerTool input", () => {
 		]);
 		expect(items.properties).toHaveProperty("region");
 		expect(items.properties).toHaveProperty("direction");
+		// Strict validators (xAI via OpenRouter) reject boolean exclusive bounds.
+		expect(json).not.toContain("exclusiveMinimum");
+		expect(json).not.toContain("exclusiveMaximum");
 	});
 
 	it("describes the tool from one shared prompt in both profiles", () => {
@@ -245,6 +249,17 @@ describe("ComputerTool input", () => {
 		expect(shared).toContain("Do not add a trailing screenshot");
 		expect(openai).toContain("screenSize space");
 		expect(openai).toContain("### Parameters");
+	});
+});
+
+describe("tool schemas", () => {
+	it("never emit boolean exclusive bounds any built-in tool", () => {
+		const registry = new ToolRegistry(createDefaultTools());
+		for (const schema of registry.toJSONSchemas()) {
+			const json = JSON.stringify(schema);
+			expect(json, schema.function.name).not.toContain("exclusiveMinimum");
+			expect(json, schema.function.name).not.toContain("exclusiveMaximum");
+		}
 	});
 });
 

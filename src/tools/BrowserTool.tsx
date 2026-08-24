@@ -124,7 +124,7 @@ const publicActionSchema = z.object({
 		.array(keyModifierSchema)
 		.describe("Optional modifiers for key actions when key is a string.")
 		.optional(),
-	durationMs: z.number().int().positive().optional(),
+	durationMs: z.number().int().min(1).optional(),
 	ms: z
 		.number()
 		.int()

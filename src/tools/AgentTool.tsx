@@ -65,7 +65,7 @@ const schema = z.object({
 	timeout_ms: z
 		.number()
 		.int()
-		.positive()
+		.min(1)
 		.optional()
 		.describe(
 			"Optional wall-clock budget for rlm sub-agents. When the budget expires, the RLM returns a partial-progress report instead of continuing normal code execution.",

@@ -84,6 +84,27 @@ describe("expert mode selection", () => {
 		expect(readBackboardConfig(homeDir).model).toEqual(OPUS);
 	});
 
+	it("keeps concurrent preference saves from clobbering each other", async () => {
+		const homeDir = await mkdtemp(path.join(os.tmpdir(), "cli-expert-"));
+		await saveBackboardConfig({ model: OPUS }, homeDir);
+		const config = new Config({ env, argv: [], homeDir });
+
+		config.setExpertMode({
+			enabled: true,
+			model: KIMI,
+			thinking: { kind: "dynamic" },
+		});
+		config.setVerbose(true);
+		await Promise.all([
+			config.saveExpertPreference(),
+			config.saveVerbosePreference(),
+		]);
+
+		const saved = readBackboardConfig(homeDir);
+		expect(saved.expert?.enabled).toBe(true);
+		expect(saved.verbose).toBe(true);
+	});
+
 	it("keeps the remembered model when expert mode is switched off", async () => {
 		const config = await configWith({
 			expert: { enabled: true, model: KIMI },

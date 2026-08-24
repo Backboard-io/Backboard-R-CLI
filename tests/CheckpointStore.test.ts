@@ -763,6 +763,29 @@ describe("revocableRecorder", () => {
 		expect(shellBeginCount(store)).toBe(0);
 	});
 
+	it("does not attribute a revoked command's writes to the next command", async () => {
+		const { bus, store } = makeStore();
+		const file = join(work, "sh.txt");
+		await writeFile(file, "v0", "utf8");
+
+		startTurn(bus, "t1");
+		const { recorder, revoke } = revocableRecorder(store.scopedToTurn("t1"));
+		await recorder.beginShellCapture(work, ctx("t1", "c1"));
+		await revoke();
+		await writeFile(file, "v1", "utf8");
+		await recorder.endShellCapture(ctx("t1", "c1"));
+		endTurn(bus, "t1");
+
+		startTurn(bus, "t2");
+		const foreground = store.scopedToTurn("t2");
+		await foreground.beginShellCapture(work, ctx("t2", "c2"));
+		await foreground.endShellCapture(ctx("t2", "c2"));
+		endTurn(bus, "t2");
+
+		expect(store.listCheckpoints()).toHaveLength(0);
+		expect(await readFile(file, "utf8")).toBe("v1");
+	});
+
 	it("rejects a revoked requireRevertible capture before any write happens", async () => {
 		const { bus, store } = makeStore();
 		const file = join(work, "f.txt");

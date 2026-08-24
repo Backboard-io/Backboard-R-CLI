@@ -375,59 +375,77 @@ export class Config {
 		if ("thinking" in next) this.expertThinking = next.thinking;
 	}
 
+	private saveQueue: Promise<void> = Promise.resolve();
+
+	private enqueueSave(op: () => Promise<void>): Promise<void> {
+		const next = this.saveQueue.then(op);
+		this.saveQueue = next.catch(() => undefined);
+		return next;
+	}
+
 	async saveRuntimeSelection(): Promise<void> {
-		const existing = readBackboardConfig(this.persistedConfigHomeDir);
-		await saveBackboardConfig(
-			{
-				...existing,
-				...(this.flags.model === undefined ? { model: this.currentModel } : {}),
-				...(this.flags.thinking === undefined
-					? { thinking: this.currentThinking }
-					: {}),
-				...(this.flags.memory === undefined
-					? { memory: this.currentMemory }
-					: {}),
-				...(this.flags.memoryProfile === undefined
-					? { memoryProfile: this.currentMemoryProfile }
-					: {}),
-			},
-			this.persistedConfigHomeDir,
-		);
+		await this.enqueueSave(async () => {
+			const existing = readBackboardConfig(this.persistedConfigHomeDir);
+			await saveBackboardConfig(
+				{
+					...existing,
+					...(this.flags.model === undefined
+						? { model: this.currentModel }
+						: {}),
+					...(this.flags.thinking === undefined
+						? { thinking: this.currentThinking }
+						: {}),
+					...(this.flags.memory === undefined
+						? { memory: this.currentMemory }
+						: {}),
+					...(this.flags.memoryProfile === undefined
+						? { memoryProfile: this.currentMemoryProfile }
+						: {}),
+				},
+				this.persistedConfigHomeDir,
+			);
+		});
 	}
 
 	async saveExpertPreference(): Promise<void> {
-		const existing = readBackboardConfig(this.persistedConfigHomeDir);
-		const expert: ExpertConfig = { enabled: this.expertEnabled };
-		if (this.expertModelRef) expert.model = this.expertModelRef;
-		if (this.expertThinking !== undefined) {
-			expert.thinking = this.expertThinking;
-		}
-		await saveBackboardConfig(
-			{ ...existing, expert },
-			this.persistedConfigHomeDir,
-		);
+		await this.enqueueSave(async () => {
+			const existing = readBackboardConfig(this.persistedConfigHomeDir);
+			const expert: ExpertConfig = { enabled: this.expertEnabled };
+			if (this.expertModelRef) expert.model = this.expertModelRef;
+			if (this.expertThinking !== undefined) {
+				expert.thinking = this.expertThinking;
+			}
+			await saveBackboardConfig(
+				{ ...existing, expert },
+				this.persistedConfigHomeDir,
+			);
+		});
 	}
 
 	async saveNotifyPreference(): Promise<void> {
-		const existing = readBackboardConfig(this.persistedConfigHomeDir);
-		await saveBackboardConfig(
-			{
-				...existing,
-				notify: this.notifyEnabled,
-			},
-			this.persistedConfigHomeDir,
-		);
+		await this.enqueueSave(async () => {
+			const existing = readBackboardConfig(this.persistedConfigHomeDir);
+			await saveBackboardConfig(
+				{
+					...existing,
+					notify: this.notifyEnabled,
+				},
+				this.persistedConfigHomeDir,
+			);
+		});
 	}
 
 	async saveVerbosePreference(): Promise<void> {
-		const existing = readBackboardConfig(this.persistedConfigHomeDir);
-		await saveBackboardConfig(
-			{
-				...existing,
-				verbose: this.verboseEnabled,
-			},
-			this.persistedConfigHomeDir,
-		);
+		await this.enqueueSave(async () => {
+			const existing = readBackboardConfig(this.persistedConfigHomeDir);
+			await saveBackboardConfig(
+				{
+					...existing,
+					verbose: this.verboseEnabled,
+				},
+				this.persistedConfigHomeDir,
+			);
+		});
 	}
 
 	get hasBackboardAuth(): boolean {

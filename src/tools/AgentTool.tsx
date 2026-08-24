@@ -9,7 +9,10 @@ import type {
 import type { AgentDefinition } from "../core/agents/AgentDefinition.ts";
 import { WORKER_AGENT_NAME } from "../core/agents/builtin.ts";
 import type { PermissionDecision } from "../core/permissions/types.ts";
-import { formatSpawnTree } from "../core/tools/AgentToolOutput.ts";
+import {
+	type AgentMode,
+	formatSpawnTree,
+} from "../core/tools/AgentToolOutput.ts";
 import type { OpenAITool } from "../core/tools/schema.ts";
 import { Tool } from "../core/tools/Tool.ts";
 import type { ToolContext } from "../core/tools/ToolContext.ts";
@@ -143,6 +146,14 @@ export class AgentTool extends Tool<AgentToolInput, AgentToolOutput> {
 
 	override isConcurrencySafe(_input: AgentToolInput): boolean {
 		return true;
+	}
+
+	override agentModeForInput(input: AgentToolInput): AgentMode | undefined {
+		const requested =
+			input && typeof input === "object" ? input.subagent_type : undefined;
+		return this.deps
+			.getCatalog()
+			.get(typeof requested === "string" ? requested : WORKER_AGENT_NAME)?.mode;
 	}
 
 	// Spawning is orchestration, not a direct effect: the sub-agent inherits the

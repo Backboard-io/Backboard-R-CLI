@@ -612,9 +612,6 @@ export class CheckpointStore implements CheckpointRecorder {
 		const before = this.shellBegins.get(callKey);
 		this.shellBegins.delete(callKey);
 		if (!before) return;
-		// Revoked before the walk: the snapshot is released above, and nothing
-		// this command changed may be journaled, so skip the re-scan.
-		if (ctx.mayJournal?.() === false) return;
 		try {
 			const after = await this.shellIndex.refresh(this.blobs, {
 				storeBlobs: true,
@@ -624,7 +621,7 @@ export class CheckpointStore implements CheckpointRecorder {
 				return;
 			}
 			this.shellLastStored = { snapshot: after, at: performance.now() };
-			// Revoked mid-walk: keep the refreshed baseline, journal nothing.
+			// Revoked: keep the refreshed baseline, journal nothing.
 			if (ctx.mayJournal?.() === false) return;
 			const diff = this.shellIndex.diff(before, after);
 			const changes = [...diff.created, ...diff.modified, ...diff.deleted];

@@ -9,6 +9,7 @@ import { BUILT_IN_AGENTS } from "../src/core/agents/builtin.ts";
 import { EventBus } from "../src/core/bus/EventBus.ts";
 import type { AgentEvent } from "../src/core/bus/events.ts";
 import type { ToolContext } from "../src/core/tools/ToolContext.ts";
+import { toolStartEvent } from "../src/core/tools/ToolEventFactory.ts";
 import { initialState } from "../src/state/AppState.ts";
 import { reduce } from "../src/state/Store.ts";
 import { AgentTool } from "../src/tools/AgentTool.tsx";
@@ -40,6 +41,7 @@ function ctx(agentDepth = 0): ToolContext {
 function makeTool(options: {
 	supervisor?: BackgroundAgentSupervisor;
 	onRun?: (signal: AbortSignal) => Promise<void>;
+	agents?: AgentDefinition[];
 }): { tool: AgentTool; depths: number[] } {
 	const depths: number[] = [];
 	const tool = new AgentTool({
@@ -60,7 +62,12 @@ function makeTool(options: {
 				throw new Error("unused");
 			},
 		}),
-		getCatalog: () => new AgentCatalog([BACKGROUND_AGENT, ...BUILT_IN_AGENTS]),
+		getCatalog: () =>
+			new AgentCatalog([
+				BACKGROUND_AGENT,
+				...(options.agents ?? []),
+				...BUILT_IN_AGENTS,
+			]),
 		maxDepth: 2,
 		maxConcurrent: 4,
 		...(options.supervisor ? { supervisor: options.supervisor } : {}),
@@ -249,6 +256,36 @@ describe("AgentTool background dispatch", () => {
 		);
 		expect(result.data.status).toBe("completed");
 		expect(supervisor.active).toHaveLength(0);
+	});
+});
+
+describe("agent mode in tool start events", () => {
+	const RLM_AGENT: AgentDefinition = {
+		name: "analyst",
+		description: "Analyzes structured inputs.",
+		mode: "rlm",
+		systemPrompt: "p",
+		source: "project",
+	};
+
+	it("labels a custom rlm agent from its catalog definition", () => {
+		const { tool } = makeTool({ agents: [RLM_AGENT] });
+		const event = toolStartEvent(
+			{ id: "call_1", name: "agent", input: {} },
+			{ prompt: "p", subagent_type: "analyst" },
+			tool,
+		);
+		expect(event).toMatchObject({ type: "tool:start", agentMode: "rlm" });
+	});
+
+	it("keeps the worker fallback for unknown names", () => {
+		const { tool } = makeTool({});
+		const event = toolStartEvent(
+			{ id: "call_2", name: "agent", input: {} },
+			{ prompt: "p", subagent_type: "missing" },
+			tool,
+		);
+		expect(event).toMatchObject({ type: "tool:start", agentMode: "worker" });
 	});
 });
 

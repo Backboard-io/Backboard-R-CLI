@@ -28,7 +28,8 @@
 		"cua:smoke": "bun run scripts/cua-smoke.ts",
 		"cua:e2e": "BACKBOARD_CUA_E2E=1 bun test tests/MacPlatform.e2e.test.ts",
 		"cua:grounding": "bun run scripts/cua-eval/grounding.ts",
-		"cua:eval": "bun run scripts/cua-eval/run.ts"
+		"cua:eval": "bun run scripts/cua-eval/run.ts",
+		"verify:providers": "bun run scripts/verify-tool-schemas.ts"
 	},
 	"dependencies": {
 		"@modelcontextprotocol/sdk": "^1.29.0",

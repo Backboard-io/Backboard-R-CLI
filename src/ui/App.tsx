@@ -320,9 +320,16 @@ export function App({
 	const [loadingLabel, setLoadingLabel] = useState("Loading");
 	const [models, setModels] = useState<ModelInfo[]>([]);
 	const refreshCredentials = useCallback((): void => {
+		const wasExpert = config.isExpertModeEnabled;
 		refreshClientCredentials(config, client);
+		if (wasExpert && !config.isExpertModeEnabled) {
+			agent.notice(
+				"Expert mode is off: its model's provider key is no longer enabled.",
+				"warning",
+			);
+		}
 		setModels([]);
-	}, [config, client]);
+	}, [agent, config, client]);
 	// Every `/keys` change re-reads credentials into the live Config, so the
 	// next request routes through the new key set without a restart. The model
 	// list is dropped because which models exist depends on those keys.

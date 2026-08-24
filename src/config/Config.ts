@@ -160,10 +160,7 @@ export class Config {
 		const expertBackendMissing =
 			expert?.enabled === true &&
 			expertModel !== null &&
-			this.auth.backboard === null &&
-			!this.auth.providerKeys.some(
-				(entry) => entry.provider === expertModel.provider,
-			);
+			!this.hasBackendFor(expertModel);
 		this.expertEnabled = (expert?.enabled ?? false) && !expertBackendMissing;
 		this.expertModelRef = expertModel;
 		this.expertModelProfile = expertModel
@@ -480,6 +477,10 @@ export class Config {
 		return this.auth.providerKeys.some((entry) => entry.provider === provider);
 	}
 
+	private hasBackendFor(model: ModelRef): boolean {
+		return this.hasBackboardAuth || this.hasProviderKeyFor(model.provider);
+	}
+
 	get hasBackendForCurrentModel(): boolean {
 		return (
 			this.hasBackboardAuth ||
@@ -498,6 +499,13 @@ export class Config {
 		const next = this.auth.backboard ?? anonymousEnv();
 		this.env.apiKey = next.apiKey;
 		this.env.apiUrl = next.apiUrl;
+		if (
+			this.expertEnabled &&
+			this.expertModelRef &&
+			!this.hasBackendFor(this.expertModelRef)
+		) {
+			this.expertEnabled = false;
+		}
 		return this.auth;
 	}
 

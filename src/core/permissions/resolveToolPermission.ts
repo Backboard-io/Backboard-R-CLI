@@ -116,6 +116,7 @@ export async function resolveToolPermission(
 			),
 		);
 		const answer = await promptForPermission(question, raw, prompt, ctx.signal);
+		if (!pctx.interactive && !pctx.escalate?.()) return unavailable;
 
 		if (answer === "deny") {
 			return {

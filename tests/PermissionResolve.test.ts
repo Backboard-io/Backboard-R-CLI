@@ -112,6 +112,29 @@ describe("escalated permission prompts", () => {
 		expect(result.allowed).toBe(false);
 	});
 
+	it("denies an approval that lands after the chain backgrounds", async () => {
+		const cwd = await tempProject();
+		let backgrounded = false;
+		const ctx = makeCtx({
+			cwd,
+			permissions: pctxWith(() =>
+				backgrounded
+					? null
+					: async () => {
+							backgrounded = true;
+							return ALLOW_ONCE;
+						},
+			),
+		});
+		const result = await resolveToolPermission(
+			new MutatingTool(),
+			{ command: "touch a" },
+			ctx,
+		);
+		expect(result.allowed).toBe(false);
+		expect(result.denialReason).toContain("unavailable");
+	});
+
 	it("honors a deny answer from the escalated prompt", async () => {
 		const cwd = await tempProject();
 		const ctx = makeCtx({

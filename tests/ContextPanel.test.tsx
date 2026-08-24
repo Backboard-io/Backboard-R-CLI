@@ -4,6 +4,7 @@ import { buildContextReport } from "../src/core/context/ContextReport.ts";
 import { userMessage } from "../src/core/session/Message.ts";
 import { ContextPanel } from "../src/ui/components/ContextPanel.tsx";
 import { TerminalSizeProvider } from "../src/ui/hooks/TerminalSizeContext.tsx";
+import { stripAnsi } from "../src/utils/terminalSafe.ts";
 import { makeInkTty } from "./inkHarness.ts";
 
 function report(usedTokens: number, cachedTokens = 0) {
@@ -86,7 +87,10 @@ describe("ContextPanel", () => {
 
 	it("keeps every rendered row inside a narrow terminal", () => {
 		const frame = renderPanel(50_000, 0, 38);
-		const visibleLines = frame.split("\n").filter((line) => line.trim());
+		const visibleLines = frame
+			.split("\n")
+			.map((line) => stripAnsi(line))
+			.filter((line) => line.trim());
 
 		expect(
 			Math.max(...visibleLines.map((line) => line.length)),

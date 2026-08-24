@@ -17,6 +17,7 @@ import {
 	thinkingLevel,
 	usesNativeAdaptiveThinking,
 } from "../thinking.ts";
+import { planToolImages, renderToolResult } from "../toolImages.ts";
 
 const API_BASE = "https://api.anthropic.com/v1";
 const API_VERSION = "2023-06-01";
@@ -35,6 +36,8 @@ const MAX_OUTPUT_PATTERNS: ReadonlyArray<{ match: RegExp; tokens: number }> = [
 	{ match: /^claude-3-5-(?:sonnet|haiku)/, tokens: 8_192 },
 	{ match: /^claude-3-(?:opus|sonnet|haiku)/, tokens: 4_096 },
 ];
+
+export { toAnthropicMessages };
 
 export function maxOutputTokensFor(model: string, requested: number): number {
 	const name = model.trim().toLowerCase();
@@ -427,7 +430,8 @@ interface RenderedMessage {
 
 function renderMessages(messages: readonly ByokMessage[]): RenderedMessage[] {
 	const out: RenderedMessage[] = [];
-	for (const message of messages) {
+	const imagePlan = planToolImages(messages);
+	for (const [messageIndex, message] of messages.entries()) {
 		if (message.role === "user") {
 			out.push({ role: "user", content: userContent(message) });
 			continue;
@@ -451,11 +455,34 @@ function renderMessages(messages: readonly ByokMessage[]): RenderedMessage[] {
 		}
 		out.push({
 			role: "user",
-			content: message.results.map((result) => ({
-				type: "tool_result",
-				tool_use_id: result.id,
-				content: result.output || "(no output)",
-			})),
+			content: message.results.map((result, resultIndex) => {
+				const rendered = renderToolResult(
+					result.output,
+					imagePlan.has(`${messageIndex}:${resultIndex}`),
+				);
+				if (rendered.images.length === 0) {
+					return {
+						type: "tool_result",
+						tool_use_id: result.id,
+						content: rendered.text || "(no output)",
+					};
+				}
+				return {
+					type: "tool_result",
+					tool_use_id: result.id,
+					content: [
+						{ type: "text", text: rendered.text || "(no output)" },
+						...rendered.images.map((image) => ({
+							type: "image",
+							source: {
+								type: "base64",
+								media_type: image.mediaType,
+								data: image.base64,
+							},
+						})),
+					],
+				};
+			}),
 		});
 	}
 	return out;

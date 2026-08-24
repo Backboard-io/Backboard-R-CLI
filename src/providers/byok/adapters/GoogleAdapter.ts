@@ -18,6 +18,11 @@ import {
 	usesNativeAdaptiveThinking,
 } from "../thinking.ts";
 import {
+	planToolImages,
+	renderToolResult,
+	TOOL_IMAGE_NOTE,
+} from "../toolImages.ts";
+import {
 	GOOGLE_IMAGE_MODEL_PATTERN,
 	GOOGLE_NON_CHAT_MODEL_PREFIXES,
 	GOOGLE_THINKING_MODEL_PATTERNS,
@@ -326,8 +331,9 @@ export function renderGoogleContents(
 	// Names, not ids, key a functionResponse - resolve each result's name from
 	// the call that produced it.
 	const callNames = new Map<string, string>();
+	const imagePlan = planToolImages(messages);
 
-	for (const message of messages) {
+	for (const [messageIndex, message] of messages.entries()) {
 		if (message.role === "user") {
 			out.push({ role: "user", parts: userParts(message) });
 			continue;
@@ -349,16 +355,30 @@ export function renderGoogleContents(
 			if (parts.length > 0) out.push({ role: "model", parts });
 			continue;
 		}
-		out.push({
-			role: "user",
-			parts: message.results.map((result) => ({
+		const parts: unknown[] = [];
+		const imageParts: unknown[] = [];
+		for (const [resultIndex, result] of message.results.entries()) {
+			const rendered = renderToolResult(
+				result.output,
+				imagePlan.has(`${messageIndex}:${resultIndex}`),
+			);
+			parts.push({
 				functionResponse: {
 					name: callNames.get(result.id) ?? result.name,
 					...(isProviderCallId(result.id) ? { id: result.id } : {}),
-					response: { result: result.output || "(no output)" },
+					response: { result: rendered.text || "(no output)" },
 				},
-			})),
-		});
+			});
+			for (const image of rendered.images) {
+				imageParts.push({
+					inlineData: { mimeType: image.mediaType, data: image.base64 },
+				});
+			}
+		}
+		if (imageParts.length > 0) {
+			parts.push({ text: TOOL_IMAGE_NOTE }, ...imageParts);
+		}
+		out.push({ role: "user", parts });
 	}
 	return out;
 }

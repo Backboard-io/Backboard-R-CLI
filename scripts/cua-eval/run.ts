@@ -50,6 +50,7 @@ interface Args {
 	out: string;
 	maxRounds: number;
 	keep: boolean;
+	model?: string;
 }
 
 interface TaskMetrics {
@@ -118,6 +119,9 @@ function parseArgs(argv: string[]): Args {
 				break;
 			case "--keep":
 				args.keep = true;
+				break;
+			case "--model":
+				args.model = next();
 				break;
 		}
 	}
@@ -397,7 +401,7 @@ async function main(): Promise<void> {
 	const config = args.dry
 		? null
 		: new Config({
-				argv: [],
+				argv: args.model ? ["--model", args.model] : [],
 				env: {
 					apiKey: process.env.BACKBOARD_API_KEY ?? "",
 					apiUrl:

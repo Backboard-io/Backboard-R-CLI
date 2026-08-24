@@ -7,6 +7,7 @@
  *   bun run scripts/cua-eval/grounding.ts            # all fixtures
  *   bun run scripts/cua-eval/grounding.ts -f calc-   # name prefix
  *   bun run scripts/cua-eval/grounding.ts --coords   # hide targets → coordinate grounding
+ *   bun run scripts/cua-eval/grounding.ts --model openrouter/x-ai/grok-4.6
  *
  * Needs BACKBOARD_API_KEY (also read from ../cli-eval/.env).
  */
@@ -33,6 +34,9 @@ import {
 
 const argv = process.argv.slice(2);
 const filter = argv.includes("-f") ? argv[argv.indexOf("-f") + 1] : undefined;
+const modelArg = argv.includes("--model")
+	? argv[argv.indexOf("--model") + 1]
+	: undefined;
 const coords = argv.includes("--coords");
 const dir = resolve(
 	argv.includes("--dir")
@@ -42,7 +46,7 @@ const dir = resolve(
 
 loadEvalEnv();
 const config = new Config({
-	argv: [],
+	argv: modelArg ? ["--model", modelArg] : [],
 	env: {
 		apiKey: process.env.BACKBOARD_API_KEY ?? "",
 		apiUrl: process.env.BACKBOARD_API_URL ?? "https://app.backboard.io/api",

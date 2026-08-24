@@ -13,6 +13,12 @@ import type {
 } from "../ByokTypes.ts";
 import { getJson, postSseJson } from "../httpStream.ts";
 import {
+	imageDataUri,
+	planToolImages,
+	renderToolResult,
+	TOOL_IMAGE_NOTE,
+} from "../toolImages.ts";
+import {
 	OPENROUTER_API_BASE,
 	OPENROUTER_APP_TITLE,
 	OPENROUTER_APP_URL,
@@ -428,9 +434,10 @@ function parseArguments(args: string): unknown {
 	}
 }
 
-function toOpenRouterMessages(request: ByokStreamRequest): unknown[] {
+export function toOpenRouterMessages(request: ByokStreamRequest): unknown[] {
 	const out: unknown[] = [{ role: "system", content: request.systemPrompt }];
-	for (const message of request.messages) {
+	const imagePlan = planToolImages(request.messages);
+	for (const [messageIndex, message] of request.messages.entries()) {
 		if (message.role === "user") {
 			out.push({ role: "user", content: userContent(message) });
 			continue;
@@ -455,12 +462,31 @@ function toOpenRouterMessages(request: ByokStreamRequest): unknown[] {
 			out.push(entry);
 			continue;
 		}
-		for (const result of message.results) {
+		// Chat tool messages are text-only, so images ride in a user message
+		// that follows the batch of results.
+		const imageParts: unknown[] = [];
+		for (const [resultIndex, result] of message.results.entries()) {
+			const rendered = renderToolResult(
+				result.output,
+				imagePlan.has(`${messageIndex}:${resultIndex}`),
+			);
 			out.push({
 				role: "tool",
 				tool_call_id: result.id,
 				name: result.name,
-				content: result.output || "(no output)",
+				content: rendered.text || "(no output)",
+			});
+			for (const image of rendered.images) {
+				imageParts.push({
+					type: "image_url",
+					image_url: { url: imageDataUri(image) },
+				});
+			}
+		}
+		if (imageParts.length > 0) {
+			out.push({
+				role: "user",
+				content: [{ type: "text", text: TOOL_IMAGE_NOTE }, ...imageParts],
 			});
 		}
 	}

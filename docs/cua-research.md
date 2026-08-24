@@ -373,6 +373,12 @@ Two agent-behaviour findings worth acting on: with no elements in the tree the m
 
 Fixtures are cropped to the app window (`capture-fixture.ts --window`) so nothing else on the screen is committed.
 
+### BYOK image path (found in real use)
+
+Running `/cua` with `openrouter/x-ai/grok-4.6` failed after three calls with *"maximum prompt length is 500000 but the request contains 591994 tokens"*. Backboard's server lifts `__image_base64` out of tool outputs into image blocks; the BYOK adapters never did, so every screenshot went to the model as ~175 KB of base64 **text** (~50k tokens, and no picture). `src/providers/byok/toolImages.ts` now strips image payloads from tool JSON and each adapter attaches them natively — Anthropic `tool_result` image blocks, OpenAI/OpenRouter a follow-up user message with `image_url` parts (tool messages are text-only), Gemini `inlineData` parts — keeping only the last 3 screenshots as images (older results say `"omitted: older screenshot"`), which is the interval-pruning pattern from Part 3.6. Grounding fixtures via BYOK after the fix: grok-4.6 (OpenRouter) 8/8 at ~5.5k tokens per fixture; claude-sonnet-5 (Anthropic direct) 8/8 at ~7k.
+
+The same session also surfaced that xAI rejects `exclusiveMinimum: true` in tool schemas (zod `.positive()` under the OpenAPI-3 target) — fixed with `.min(1)` and a registry-wide test; `scripts/verify-tool-schemas.ts` now sends every tool schema to every configured backend (18/18 pass).
+
 ### Not done / next
 
 - Windows helper needs its first run on a Windows machine.

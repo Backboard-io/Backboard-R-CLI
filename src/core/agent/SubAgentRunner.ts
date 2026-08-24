@@ -141,6 +141,7 @@ export class SubAgentRunner {
 		// Closes over locals, not `params`, so the chain link a descendant keeps
 		// does not pin this run's prompt and permissions.
 		let handedOff = false;
+		const escalationAbort = new AbortController();
 		const parentPermissions = params.parentPermissions;
 		const launchedInBackground = params.chainInBackground === true;
 		const backgroundChain: BackgroundChainState = {
@@ -178,10 +179,18 @@ export class SubAgentRunner {
 						interactive: false,
 						escalate: () => {
 							if (backgroundChain.inBackground) return null;
-							if (parentPermissions.interactive) {
-								return params.parentAskUser ?? null;
-							}
-							return parentPermissions.escalate?.() ?? null;
+							const upstream = parentPermissions.interactive
+								? params.parentAskUser
+								: parentPermissions.escalate?.();
+							if (!upstream) return null;
+							return (question, options, signal) =>
+								upstream(
+									question,
+									options,
+									signal
+										? AbortSignal.any([signal, escalationAbort.signal])
+										: escalationAbort.signal,
+								);
 						},
 						promptHost: parentPermissions.promptHost ?? parentPermissions,
 					}
@@ -287,6 +296,7 @@ export class SubAgentRunner {
 		// Also moves `backgroundChain` to the background, so budgets stop being
 		// enforced for anything the run spawns from here on.
 		handedOff = true;
+		escalationAbort.abort();
 		budget.detachFromParent();
 		detachParentProgress();
 		await revocable?.revoke();

@@ -26,7 +26,7 @@ export interface UseAgent {
 type Action =
 	| { type: "event"; event: AgentEvent }
 	| { type: "model"; label: string }
-	| { type: "clear" }
+	| { type: "clear"; scope: "session" | "transcript" }
 	| { type: "hydrate"; messages: readonly Message[] }
 	| { type: "notice"; text: string; level: "info" | "warning" | "error" };
 
@@ -40,7 +40,7 @@ export function rootReducer(state: AppState, action: Action): AppState {
 				transcript: [],
 				todos: [],
 				usage: {},
-				backgroundAgents: [],
+				...(action.scope === "session" ? { backgroundAgents: [] } : {}),
 				render: {
 					staticItems: [],
 					liveItems: [],
@@ -137,10 +137,13 @@ export function useAgent(
 		(label: string) => store.dispatch({ type: "model", label }),
 		[store],
 	);
-	const clear = useCallback(() => store.dispatch({ type: "clear" }), [store]);
+	const clear = useCallback(
+		() => store.dispatch({ type: "clear", scope: "transcript" }),
+		[store],
+	);
 	const newThread = useCallback(() => {
 		controller.newThread();
-		store.dispatch({ type: "clear" });
+		store.dispatch({ type: "clear", scope: "session" });
 	}, [controller, store]);
 	const hydrateTranscript = useCallback(
 		(messages: readonly Message[]) =>

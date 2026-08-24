@@ -329,9 +329,34 @@ describe("background agents in AppState", () => {
 		} satisfies AgentEvent);
 		expect(state.backgroundAgents).toHaveLength(1);
 
-		expect(rootReducer(state, { type: "clear" }).backgroundAgents).toEqual([]);
+		expect(
+			rootReducer(state, { type: "clear", scope: "session" }).backgroundAgents,
+		).toEqual([]);
 		expect(
 			rootReducer(state, { type: "hydrate", messages: [] }).backgroundAgents,
 		).toEqual([]);
+	});
+
+	it("keeps running rows through a transcript-only clear", () => {
+		const run = {
+			id: "bg_3",
+			agent: "watcher",
+			label: "watch the build",
+			status: "running" as const,
+			startedAt: Date.now(),
+			rounds: 0,
+		};
+		let state = initialState("gpt-test");
+		state = reduce(state, {
+			type: "agent:background_started",
+			run,
+		} satisfies AgentEvent);
+
+		const compacted = rootReducer(state, {
+			type: "clear",
+			scope: "transcript",
+		});
+		expect(compacted.transcript).toEqual([]);
+		expect(compacted.backgroundAgents).toHaveLength(1);
 	});
 });

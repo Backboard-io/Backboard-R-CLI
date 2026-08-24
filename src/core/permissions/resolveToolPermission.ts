@@ -115,7 +115,13 @@ export async function resolveToolPermission(
 				input as Parameters<typeof tool.permissionContentIsPaths>[0],
 			),
 		);
-		const answer = await promptForPermission(question, raw, prompt, ctx.signal);
+		let answer: "once" | "always" | "deny";
+		try {
+			answer = await promptForPermission(question, raw, prompt, ctx.signal);
+		} catch (error) {
+			if (!pctx.interactive && !pctx.escalate?.()) return unavailable;
+			throw error;
+		}
 		if (!pctx.interactive && !pctx.escalate?.()) return unavailable;
 
 		if (answer === "deny") {

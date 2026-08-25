@@ -91,7 +91,7 @@ function buildAgentTool(deps: DefaultToolDeps, base: Tool[]): AgentTool {
 		memory: deps.config.memory,
 		memoryProfile: deps.config.memoryProfile,
 		getThinking: (model, signal) =>
-			resolveRuntimeThinking(executionView(model), deps.client, undefined, {
+			resolveRuntimeThinking(executionView(model), deps.client, {
 				signal,
 			}),
 		getThinkingResolver: (model, signal) =>

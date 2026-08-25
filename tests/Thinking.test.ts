@@ -30,7 +30,6 @@ describe("thinking config", () => {
 			kind: "level",
 			level: "max",
 		});
-		expect(parseThinking("dynamic")).toEqual({ kind: "dynamic" });
 		expect(parseThinking("4096")).toEqual({ kind: "budget", tokens: 4096 });
 		expect(() => parseThinking("on")).toThrow();
 	});
@@ -97,84 +96,6 @@ describe("thinking config", () => {
 		).toThrow("explicit token budgets");
 	});
 
-	it("resolves dynamic intent deterministically from evidence", () => {
-		expect(
-			resolveThinking({
-				intent: { kind: "dynamic" },
-				model,
-				metadata: metadata(["budget_tokens"]),
-			}),
-		).toEqual({ budget_tokens: 4096 });
-		expect(
-			resolveThinking({
-				intent: { kind: "dynamic" },
-				model,
-				metadata: metadata(["max_tokens"]),
-				dynamicEvidence: {
-					phase: "initial",
-					requestKind: "user",
-					hasDiagnosticText: true,
-				},
-			}),
-		).toEqual({ max_tokens: 8192 });
-		expect(
-			resolveThinking({
-				intent: { kind: "dynamic" },
-				model,
-				metadata: metadata(["effort"]),
-			}),
-		).toEqual({ effort: "medium" });
-		expect(
-			resolveThinking({
-				intent: { kind: "dynamic" },
-				model,
-				metadata: metadata(["effort"]),
-				dynamicEvidence: {
-					phase: "tool_outputs",
-					requestKind: "user",
-					toolRound: {
-						index: 1,
-						readOnlyOnly: true,
-						hadWriteOrExecute: false,
-						hadToolError: false,
-						hadNonZeroExit: false,
-						hadTimeout: false,
-						consecutiveFailureCount: 0,
-						maxUsed: false,
-					},
-				},
-			}),
-		).toEqual({ effort: "medium" });
-		expect(
-			resolveThinking({
-				intent: { kind: "dynamic" },
-				model,
-				metadata: metadata(["effort"]),
-				dynamicEvidence: {
-					phase: "tool_outputs",
-					requestKind: "user",
-					toolRound: {
-						index: 2,
-						readOnlyOnly: false,
-						hadWriteOrExecute: true,
-						hadToolError: false,
-						hadNonZeroExit: true,
-						hadTimeout: false,
-						consecutiveFailureCount: 2,
-						maxUsed: false,
-					},
-				},
-			}),
-		).toEqual({ effort: "max" });
-		expect(
-			resolveThinking({
-				intent: { kind: "dynamic" },
-				model: { provider: "anthropic", model: "claude-sonnet-5" },
-				metadata: metadata(["effort"]),
-			}),
-		).toEqual({});
-	});
-
 	it("honors defaults-only and unsupported metadata", () => {
 		expect(
 			resolveThinking({
@@ -218,16 +139,14 @@ describe("thinking config", () => {
 		const resolver = await createRuntimeThinkingResolver(
 			{
 				model: { provider: "openrouter", model: "z-ai/glm-5.2" },
-				thinkingIntent: { kind: "dynamic" },
+				thinkingIntent: { kind: "level", level: "medium" },
 			},
 			client,
 		);
 
 		expect(metadataCalls).toBe(1);
 		expect(listCalls).toBe(0);
-		expect(resolver.resolve({ phase: "initial", requestKind: "user" })).toEqual(
-			{ max_tokens: 4096 },
-		);
+		expect(resolver.resolve()).toEqual({ max_tokens: 4096 });
 	});
 
 	it("runtime resolver skips metadata lookup when thinking is off", async () => {
@@ -246,16 +165,14 @@ describe("thinking config", () => {
 		);
 
 		expect(metadataCalls).toBe(0);
-		expect(
-			resolver.resolve({ phase: "initial", requestKind: "user" }),
-		).toBeNull();
+		expect(resolver.resolve()).toBeNull();
 	});
 
 	it("runtime resolver falls back when targeted metadata fails", async () => {
 		const resolver = await createRuntimeThinkingResolver(
 			{
 				model: { provider: "openrouter", model: "z-ai/glm-5.2" },
-				thinkingIntent: { kind: "dynamic" },
+				thinkingIntent: { kind: "level", level: "medium" },
 			},
 			{
 				getModelThinkingMetadata: async () => {
@@ -264,8 +181,6 @@ describe("thinking config", () => {
 			},
 		);
 
-		expect(resolver.resolve({ phase: "initial", requestKind: "user" })).toEqual(
-			{ max_tokens: 4096 },
-		);
+		expect(resolver.resolve()).toEqual({ max_tokens: 4096 });
 	});
 });

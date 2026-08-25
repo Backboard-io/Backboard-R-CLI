@@ -147,9 +147,6 @@ function readThinkingValue(
 	) {
 		return { kind: "level", level: thinkingConfig.level };
 	}
-	if (thinkingConfig.kind === "dynamic") {
-		return { kind: "dynamic" };
-	}
 	if (
 		thinkingConfig.kind === "budget" &&
 		typeof thinkingConfig.tokens === "number" &&

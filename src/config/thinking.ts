@@ -1,9 +1,5 @@
 import { resolveBudget } from "./thinking.budgets.ts";
 import { THINKING_LEVELS } from "./thinking.constants.ts";
-import {
-	resolveDynamicThinkingLevel,
-	shouldDeferDynamicThinking,
-} from "./thinking.dynamic.ts";
 import type {
 	ThinkingConfig,
 	ThinkingIntent,
@@ -22,7 +18,6 @@ export function parseThinking(value: string): ThinkingIntent | null {
 
 	const level = normalized === "maximum" ? "max" : normalized;
 	if (isThinkingLevel(level)) return { kind: "level", level };
-	if (normalized === "dynamic") return { kind: "dynamic" };
 
 	const budget = Number(normalized);
 	if (Number.isInteger(budget) && budget > 0) {
@@ -30,7 +25,7 @@ export function parseThinking(value: string): ThinkingIntent | null {
 	}
 
 	throw new Error(
-		"thinking must be one of: off, low, medium, high, max, dynamic, or a token budget",
+		"thinking must be one of: off, low, medium, high, max, or a token budget",
 	);
 }
 
@@ -51,40 +46,6 @@ export function resolveThinking(
 	if (allowedFields.length === 0) {
 		throw new Error(
 			`Thinking controls are not available for ${formatModel(model)}.`,
-		);
-	}
-
-	if (intent.kind === "dynamic") {
-		if (
-			shouldDeferDynamicThinking(
-				profile?.nativeAdaptive ?? false,
-				context.dynamicEvidence,
-			)
-		) {
-			return {};
-		}
-		const level = resolveDynamicThinkingLevel(context.dynamicEvidence);
-		const tokenField = tokenFieldFor(allowedFields);
-		if (tokenField) {
-			const budget = resolveBudget(
-				profile?.budgetPolicyId ?? "generic",
-				level,
-				{
-					field: tokenField,
-					metadata,
-				},
-			);
-			return tokenField === "max_tokens"
-				? { max_tokens: budget }
-				: { budget_tokens: budget };
-		}
-		if (allowedFields.includes("effort")) {
-			return {
-				effort: clampEffort(level, profile?.maxEffort),
-			};
-		}
-		throw new Error(
-			`Dynamic thinking cannot be mapped for ${formatModel(model)}.`,
 		);
 	}
 

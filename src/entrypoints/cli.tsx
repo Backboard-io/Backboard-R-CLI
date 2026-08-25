@@ -106,7 +106,7 @@ Usage:
 Options:
   --model <provider/model>   Model to use (e.g. openai/gpt-5.5)
   --format <default|json>    Output format (default: default)
-  --thinking <level>         Thinking: off, low, medium, high, max, dynamic, or token budget
+  --thinking <level>         Thinking: off, low, medium, high, max, or token budget
   --memory <mode>            Memory mode: off, on, auto, readonly
   --memory-profile <name>    Memory profile: default, code, coding
   --excluded-tools <names>   Comma-separated tool names to hide from the agent

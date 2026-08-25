@@ -22,11 +22,6 @@ const LEVEL_CHOICES: ThinkingChoice[] = [
 	{ label: "Max", value: { kind: "level", level: "max" } },
 ];
 
-const DYNAMIC_CHOICE: ThinkingChoice = {
-	label: "Dynamic",
-	value: { kind: "dynamic" },
-};
-
 export function buildThinkingChoiceMetadata(
 	model: ModelInfo,
 ): ThinkingChoiceMetadata {
@@ -48,7 +43,7 @@ export function buildThinkingChoiceMetadata(
 	}
 
 	return {
-		choices: [OFF_CHOICE, ...LEVEL_CHOICES, DYNAMIC_CHOICE],
+		choices: [OFF_CHOICE, ...LEVEL_CHOICES],
 		automaticOnly: false,
 		selectable: true,
 	};

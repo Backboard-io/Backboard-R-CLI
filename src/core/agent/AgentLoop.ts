@@ -1,5 +1,4 @@
 import type {
-	DynamicThinkingEvidence,
 	MemoryMode,
 	MemoryProfile,
 	ThinkingConfig,
@@ -24,7 +23,6 @@ import { SystemNotificationRunner } from "./notifications/SystemNotificationRunn
 import { todoReconciliationNotification } from "./notifications/TodoReconciliationNotification.ts";
 import { ProviderStreamConsumer } from "./ProviderStreamConsumer.ts";
 import { buildRunMessageRequest } from "./RunMessageRequestBuilder.ts";
-import { hasStructuralDiagnosticText } from "./ThinkingEvidence.ts";
 import { ToolRoundProcessor } from "./ToolRoundProcessor.ts";
 import { Turn } from "./Turn.ts";
 
@@ -87,8 +85,6 @@ export class AgentLoop {
 			bus,
 			consumer,
 			tools: this.deps.tools,
-			resolveThinking: (evidence) => this.resolveThinking(evidence),
-			requestKind: this.deps.requestKind ?? "user",
 			maxToolRounds: this.deps.maxToolRounds,
 		});
 		this.executedToolRounds = 0;
@@ -133,11 +129,7 @@ export class AgentLoop {
 		});
 
 		try {
-			const initialThinking = this.resolveThinking({
-				phase: "initial",
-				requestKind: this.deps.requestKind ?? "user",
-				hasDiagnosticText: hasStructuralDiagnosticText(content),
-			});
+			const initialThinking = this.resolveThinking();
 			const messageOptions = {
 				signal: ctx.signal,
 				attachmentFilePaths: this.deps.attachmentFilePaths,
@@ -207,12 +199,10 @@ export class AgentLoop {
 		return turn.status;
 	}
 
-	private resolveThinking(
-		evidence: DynamicThinkingEvidence,
-	): ThinkingConfig | null | undefined {
+	private resolveThinking(): ThinkingConfig | null | undefined {
 		if (this.deps.thinkingResolver) {
-			return this.deps.thinkingResolver.resolve(evidence);
+			return this.deps.thinkingResolver.resolve();
 		}
-		return evidence.phase === "initial" ? this.deps.thinking : undefined;
+		return this.deps.thinking;
 	}
 }

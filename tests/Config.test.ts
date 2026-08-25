@@ -295,19 +295,19 @@ describe("Config", () => {
 		expect(reopened.memoryProfile).toBe("code");
 	});
 
-	it("loads saved dynamic thinking selections", async () => {
+	it("loads saved token-budget thinking selections", async () => {
 		const homeDir = await mkdtemp(path.join(os.tmpdir(), "cli-config-"));
 		await saveBackboardConfig(
 			{
 				apiKey: "file-key",
-				thinking: { kind: "dynamic" },
+				thinking: { kind: "budget", tokens: 4096 },
 			},
 			homeDir,
 		);
 
 		const config = new Config({ env, argv: [], homeDir });
 
-		expect(config.thinking).toEqual({ kind: "dynamic" });
+		expect(config.thinking).toEqual({ kind: "budget", tokens: 4096 });
 	});
 
 	it("persists the notify preference", async () => {
@@ -467,12 +467,6 @@ describe("Config", () => {
 			argv: ["--model", "anthropic/claude", "--thinking", "4096"],
 		});
 		expect(budget.thinking).toEqual({ kind: "budget", tokens: 4096 });
-
-		const dynamic = new Config({
-			env,
-			argv: ["--model", "anthropic/claude", "--thinking", "dynamic"],
-		});
-		expect(dynamic.thinking).toEqual({ kind: "dynamic" });
 	});
 
 	it("supports --flag=value form", () => {

@@ -1,9 +1,5 @@
 import { describe, expect, it } from "bun:test";
 import {
-	fetchStartupUpdate,
-	NO_UPDATE_CHECK_ENV,
-} from "../src/core/update/startupNotice.ts";
-import {
 	checkForCliUpdate,
 	cliInstallCommand,
 	compareSemver,
@@ -85,54 +81,5 @@ describe("checkForCliUpdate", () => {
 		});
 		expect(result.status).toBe("error");
 		expect(result.error).toContain("network down");
-	});
-});
-
-describe("fetchStartupUpdate (session-card row)", () => {
-	const params = (
-		fetchImpl: (input: string | URL, init?: RequestInit) => Promise<Response>,
-	) => ({
-		apiUrl: "https://api.example.com",
-		currentVersion: "3.0.1",
-		fetchImpl,
-	});
-
-	it("returns both version numbers when a newer version is published", async () => {
-		const info = await fetchStartupUpdate(
-			params(async () => jsonResponse({ version: "3.1.0" })),
-			{},
-		);
-		expect(info).toEqual({ current: "3.0.1", latest: "3.1.0" });
-	});
-
-	it("returns null when up to date", async () => {
-		const info = await fetchStartupUpdate(
-			params(async () => jsonResponse({ version: "3.0.1" })),
-			{},
-		);
-		expect(info).toBeNull();
-	});
-
-	it("returns null when the check fails", async () => {
-		const info = await fetchStartupUpdate(
-			params(async () => {
-				throw new Error("network down");
-			}),
-			{},
-		);
-		expect(info).toBeNull();
-	});
-
-	it("is disabled by the opt-out env var", async () => {
-		let fetched = false;
-		const info = await fetchStartupUpdate(
-			params(async () => {
-				fetched = true;
-				return jsonResponse({ version: "9.9.9" });
-			}),
-			{ [NO_UPDATE_CHECK_ENV]: "1" },
-		);
-		expect(fetched).toBe(false);
-		expect(info).toBeNull();
 	});
 });

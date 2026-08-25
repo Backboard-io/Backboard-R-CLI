@@ -35,7 +35,6 @@ export function SessionCard({
 	status = "Synced",
 	model = "gpt-5.5 high fast",
 	context = "0 / 1.0M",
-	update = null,
 }: SessionCardProps): React.ReactElement {
 	const { columns } = useTerminalSize();
 	const uiTheme = useTheme();
@@ -123,24 +122,6 @@ export function SessionCard({
 					{layout.showHelpDescription ? (
 						<Text color={uiTheme.readableSecondaryText}>View commands</Text>
 					) : null}
-				</Box>
-			) : null}
-
-			{update && layout.showHelpRow ? (
-				<Box>
-					<Box minWidth={layout.rowLabelWidth}>
-						<Text color={theme.warning} bold>
-							/update
-						</Text>
-					</Box>
-					<Text color={theme.warning}>
-						{clipEnd(
-							layout.showHelpDescription
-								? `New version v${update.latest} available (on v${update.current})`
-								: `v${update.latest} available`,
-							rowValueWidth,
-						)}
-					</Text>
 				</Box>
 			) : null}
 		</Box>

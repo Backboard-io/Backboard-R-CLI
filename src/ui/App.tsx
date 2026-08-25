@@ -57,10 +57,6 @@ import type {
 	SkillPickerItem,
 	SkillPickerTab,
 } from "../core/skills/SkillController.ts";
-import {
-	fetchStartupUpdate,
-	type StartupUpdateInfo,
-} from "../core/update/startupNotice.ts";
 import { checkForCliUpdate } from "../core/update/updateCheck.ts";
 import type { AgentClient } from "../providers/AgentClient.ts";
 import { fetchModels } from "../providers/backboard/models.ts";
@@ -282,15 +278,6 @@ export function App({
 }: Props): React.ReactElement {
 	const app = useApp();
 	const agent = useAgent(controller, bus, config.modelString, startupWarnings);
-	// Background startup version check. When a newer CLI is published we stash
-	// the versions in state and reprint the startup card (via updateEpoch, the
-	// same <Static> remount trick /verbose uses) so the "new version" row shows
-	// up inside the session box. Silent — and no reprint — when up to date,
-	// offline, or opted out. Ref-guarded so it runs at most once. The effect
-	// itself lives below, after useStdout() supplies stdout/write.
-	const [updateInfo, setUpdateInfo] = useState<StartupUpdateInfo | null>(null);
-	const [updateEpoch, setUpdateEpoch] = useState(0);
-	const updateCheckFired = useRef(false);
 	const [showBanner, setShowBanner] = useState(true);
 	const [queuedPrompts, setQueuedPrompts] = useState<QueuedPromptItem[]>([]);
 	const [promptHistory, setPromptHistory] = useState<PromptHistoryState>(
@@ -303,7 +290,6 @@ export function App({
 		model: agent.state.model,
 		cwd: config.cwd,
 		usage: agent.state.usage,
-		update: updateInfo,
 	};
 	const [mode, setMode] = useState<Mode>("normal");
 	const initialResumeApplied = useRef(false);
@@ -457,20 +443,6 @@ export function App({
 		setMode("context");
 	}, [client, config, controller]);
 
-	useEffect(() => {
-		if (updateCheckFired.current) return;
-		updateCheckFired.current = true;
-		void fetchStartupUpdate({
-			apiUrl: config.env.apiUrl,
-			currentVersion: APP_VERSION,
-		}).then((info) => {
-			if (!info) return;
-			setUpdateInfo(info);
-			// Reprint the (append-only) startup card so it now carries the row.
-			if (stdout.isTTY) write(CLEAR_VISIBLE_SCREEN);
-			setUpdateEpoch((epoch) => epoch + 1);
-		});
-	}, [config.env.apiUrl, stdout, write]);
 	const submitPrompt = useCallback(
 		(
 			text: string,
@@ -1831,10 +1803,7 @@ export function App({
 		agent.state.render.generation,
 	);
 	const staticGeneration =
-		agent.state.render.generation +
-		resize.resizeEpoch +
-		verboseEpoch +
-		updateEpoch;
+		agent.state.render.generation + resize.resizeEpoch + verboseEpoch;
 	const staticBanner = useStableStaticBanner(
 		showBanner ? banner : null,
 		staticGeneration,

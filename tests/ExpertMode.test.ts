@@ -71,14 +71,14 @@ describe("expert mode selection", () => {
 		config.setExpertMode({
 			enabled: true,
 			model: KIMI,
-			thinking: { kind: "dynamic" },
+			thinking: { kind: "level", level: "high" },
 		});
 		await config.saveExpertPreference();
 
 		expect(readBackboardConfig(homeDir).expert).toEqual({
 			enabled: true,
 			model: KIMI,
-			thinking: { kind: "dynamic" },
+			thinking: { kind: "level", level: "high" },
 		});
 		// The main /model selection is untouched by an expert change.
 		expect(readBackboardConfig(homeDir).model).toEqual(OPUS);
@@ -92,7 +92,7 @@ describe("expert mode selection", () => {
 		config.setExpertMode({
 			enabled: true,
 			model: KIMI,
-			thinking: { kind: "dynamic" },
+			thinking: { kind: "level", level: "high" },
 		});
 		config.setVerbose(true);
 		await Promise.all([

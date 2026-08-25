@@ -5,7 +5,6 @@ export type MemoryProfile = "default" | "code";
 export type OutputFormat = "default" | "json";
 export { parseThinking, resolveThinking } from "./thinking.ts";
 export type {
-	DynamicThinkingEvidence,
 	ThinkingConfig,
 	ThinkingIntent,
 	ThinkingLevel,

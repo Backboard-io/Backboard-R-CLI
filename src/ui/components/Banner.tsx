@@ -3,7 +3,6 @@ import type React from "react";
 import { APP_VERSION } from "../../config/branding.ts";
 import type { UsageInfo } from "../../core/bus/events.ts";
 import { formatTokens } from "../../core/context/tokens.ts";
-import type { StartupUpdateInfo } from "../../core/update/startupNotice.ts";
 import type { RunStatus } from "../../state/AppState.ts";
 import { shellPathLabel } from "../utils/pathLabels.ts";
 import { SessionCard } from "./SessionCard.tsx";
@@ -14,7 +13,6 @@ interface Props {
 	model: string;
 	cwd: string;
 	usage: UsageInfo;
-	update?: StartupUpdateInfo | null;
 }
 
 const CONTEXT_LIMIT = 1_000_000;
@@ -24,7 +22,6 @@ export function Banner({
 	model,
 	cwd,
 	usage,
-	update,
 }: Props): React.ReactElement {
 	return (
 		<Box flexDirection="column">
@@ -42,7 +39,6 @@ export function Banner({
 					model={model}
 					context={contextLabel(usage)}
 					status={statusLabel(status)}
-					update={update}
 				/>
 			</Box>
 		</Box>

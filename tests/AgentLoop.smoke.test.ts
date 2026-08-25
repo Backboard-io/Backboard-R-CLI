@@ -819,7 +819,7 @@ describe("AgentController loop (mocked Backboard)", () => {
 		expect(req.tools?.map((tool) => tool.function.name)).toEqual(["Visible"]);
 	});
 
-	it("resolves dynamic thinking before sending requests to Backboard", async () => {
+	it("resolves thinking from targeted metadata before sending requests", async () => {
 		const client = new FakeClient(
 			[
 				{ kind: "thread", threadId: "thr_1" },
@@ -830,7 +830,7 @@ describe("AgentController loop (mocked Backboard)", () => {
 		);
 		const config = new Config({
 			env,
-			argv: ["--model", "openrouter/deepseek-r1", "--thinking", "dynamic"],
+			argv: ["--model", "openrouter/deepseek-r1", "--thinking", "medium"],
 		});
 		const bus = new EventBus();
 		const session = new Session("sess_test");
@@ -856,49 +856,7 @@ describe("AgentController loop (mocked Backboard)", () => {
 		expect(client.listModelsCount).toBe(0);
 	});
 
-	it("sends dynamic thinking overrides on tool continuations", async () => {
-		const client = new FakeClient(
-			[
-				{ kind: "thread", threadId: "thr_1" },
-				{
-					kind: "requires_action",
-					runId: "run_1",
-					calls: [{ id: "c1", name: "Echo", input: {} }],
-				},
-			],
-			[{ kind: "assistant_delta", text: "done" }, { kind: "completed" }],
-		);
-		const config = new Config({
-			env,
-			argv: ["--model", "openai/gpt-5.5", "--thinking", "dynamic"],
-		});
-		const bus = new EventBus();
-		const session = new Session("sess_test");
-		const registry = new ToolRegistry([
-			new TestTool({ name: "Echo", readOnly: true }),
-		]);
-		const skillController = new SkillController({ cwd: config.cwd, bus });
-		const ctrl = new AgentController({
-			config,
-			bus,
-			session,
-			registry,
-			client: client as unknown as BackboardClient,
-			skillController,
-			permissions: TEST_PERMISSIONS,
-		});
-
-		await ctrl.submit("do it");
-
-		expect(client.messageRequests[0]?.thinking).toEqual({ effort: "medium" });
-		expect(client.toolOutputRequests[0]?.thinking).toEqual({
-			effort: "medium",
-		});
-		expect(client.modelThinkingMetadataCount).toBe(1);
-		expect(client.listModelsCount).toBe(0);
-	});
-
-	it("omits continuation thinking for static thinking", async () => {
+	it("omits continuation thinking so the backend reuses the initial value", async () => {
 		const client = new FakeClient(
 			[
 				{ kind: "thread", threadId: "thr_1" },
@@ -972,83 +930,6 @@ describe("AgentController loop (mocked Backboard)", () => {
 
 		expect(client.messageRequests[0]?.thinking).toBeNull();
 		expect(client.toolOutputRequests[0]).not.toHaveProperty("thinking");
-	});
-
-	it("does not thrash max during persistent dynamic failures", async () => {
-		class MultiRoundClient extends FakeClient {
-			private round = 0;
-
-			constructor() {
-				super([], []);
-			}
-
-			override async *runMessage(
-				req: SendMessageRequest,
-			): AsyncIterable<ProviderEvent> {
-				this.messageRequests.push(req);
-				yield { kind: "thread", threadId: "thr_1" };
-				yield {
-					kind: "requires_action",
-					runId: "run_1",
-					calls: [{ id: "c1", name: "Fail", input: {} }],
-				};
-			}
-
-			override async *runToolOutputs(
-				req: SubmitToolOutputsRequest,
-			): AsyncIterable<ProviderEvent> {
-				this.toolOutputRequests.push(req);
-				this.round++;
-				const next = [
-					{ id: "c2", name: "Fail" },
-					{ id: "c3", name: "Echo" },
-					{ id: "c4", name: "Fail" },
-					{ id: "c5", name: "Fail" },
-				][this.round - 1];
-				if (!next) {
-					yield { kind: "assistant_delta", text: "done" };
-					yield { kind: "completed" };
-					return;
-				}
-				yield {
-					kind: "requires_action",
-					runId: "run_1",
-					calls: [{ id: next.id, name: next.name, input: {} }],
-				};
-			}
-		}
-
-		const client = new MultiRoundClient();
-		const config = new Config({
-			env,
-			argv: ["--model", "openai/gpt-5.5", "--thinking", "dynamic"],
-		});
-		const bus = new EventBus();
-		const session = new Session("sess_test");
-		const registry = new ToolRegistry([
-			new TestTool({ name: "Fail", readOnly: true, throws: true }),
-			new TestTool({ name: "Echo", readOnly: true }),
-		]);
-		const skillController = new SkillController({ cwd: config.cwd, bus });
-		const ctrl = new AgentController({
-			config,
-			bus,
-			session,
-			registry,
-			client: client as unknown as BackboardClient,
-			skillController,
-			permissions: TEST_PERMISSIONS,
-		});
-
-		await ctrl.submit("do it");
-
-		expect(client.toolOutputRequests.map((req) => req.thinking)).toEqual([
-			{ effort: "high" },
-			{ effort: "max" },
-			{ effort: "medium" },
-			{ effort: "high" },
-			{ effort: "max" },
-		]);
 	});
 
 	it("keeps the backend thread when the assistant shape is unchanged", async () => {

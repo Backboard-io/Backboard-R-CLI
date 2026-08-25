@@ -1,5 +1,3 @@
-import type { StartupUpdateInfo } from "../../core/update/startupNotice.ts";
-
 export type ShellPromptState = "default" | "active";
 
 export interface ShellPromptProps {
@@ -33,8 +31,6 @@ export interface SessionCardProps {
 	status?: string;
 	model?: string;
 	context?: string;
-	/** When set, the card shows a "new version available" row pointing at /update. */
-	update?: StartupUpdateInfo | null;
 }
 
 export type AuthPromptSelection = "login" | "byok" | "exit";

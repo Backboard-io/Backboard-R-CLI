@@ -3,27 +3,22 @@ import type { Config } from "./Config.ts";
 import type { ThinkingConfig } from "./defaults.ts";
 import { resolveThinking } from "./defaults.ts";
 import type {
-	DynamicThinkingEvidence,
 	ThinkingIntent,
 	ThinkingModelMetadata,
 } from "./thinking.types.ts";
 
 export interface RuntimeThinkingResolver {
 	intent: ThinkingIntent | null | undefined;
-	resolve(evidence: DynamicThinkingEvidence): ThinkingConfig | null | undefined;
+	resolve(): ThinkingConfig | null | undefined;
 }
 
 export async function resolveRuntimeThinking(
 	config: Pick<Config, "model" | "thinkingIntent">,
 	client: Pick<AgentClient, "getModelThinkingMetadata">,
-	evidence: DynamicThinkingEvidence = {
-		phase: "initial",
-		requestKind: "user",
-	},
 	options: RequestOptions = {},
 ): Promise<ThinkingConfig | null | undefined> {
 	const resolver = await createRuntimeThinkingResolver(config, client, options);
-	return resolver.resolve(evidence);
+	return resolver.resolve();
 }
 
 /** `options.signal` abandons the metadata lookup; the resolver then has none. */
@@ -40,16 +35,8 @@ export async function createRuntimeThinkingResolver(
 			: await findModelInfo(client, model, options).catch(() => null);
 	return {
 		intent,
-		resolve(evidence) {
-			if (evidence.phase === "tool_outputs" && intent?.kind !== "dynamic") {
-				return undefined;
-			}
-			return resolveThinking({
-				intent,
-				model,
-				metadata,
-				dynamicEvidence: evidence,
-			});
+		resolve() {
+			return resolveThinking({ intent, model, metadata });
 		},
 	};
 }

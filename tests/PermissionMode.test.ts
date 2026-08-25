@@ -17,11 +17,11 @@ describe("PermissionMode", () => {
 		]);
 	});
 
-	it("parses valid modes and defaults to manual", () => {
+	it("parses valid modes and defaults to auto", () => {
 		expect(parsePermissionMode("bypass")).toBe("bypass");
 		expect(parsePermissionMode("acceptEdits")).toBe("acceptEdits");
-		expect(parsePermissionMode("nonsense")).toBe("manual");
-		expect(parsePermissionMode(undefined)).toBe("manual");
+		expect(parsePermissionMode("nonsense")).toBe("auto");
+		expect(parsePermissionMode(undefined)).toBe("auto");
 	});
 
 	it("recognizes known modes (for flag validation)", () => {

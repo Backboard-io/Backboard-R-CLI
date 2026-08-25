@@ -31,7 +31,7 @@ export function isKnownPermissionMode(value: string | undefined): boolean {
 }
 
 export function parsePermissionMode(value: string | undefined): PermissionMode {
-	return isKnownPermissionMode(value) ? (value as PermissionMode) : "manual";
+	return isKnownPermissionMode(value) ? (value as PermissionMode) : "auto";
 }
 
 export function nextPermissionMode(mode: PermissionMode): PermissionMode {

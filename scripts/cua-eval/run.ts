@@ -398,10 +398,8 @@ async function runTask(
 			memoryProfile: config.memoryProfile,
 			getThinking: () => resolveRuntimeThinking(config, client),
 			getThinkingResolver: () => createRuntimeThinkingResolver(config, client),
-			systemPrompt: `${computerSystemPrompt.prompt}\n\nYou are operating a Linux XFCE desktop. The Execute tool runs shell commands inside the same machine; use it whenever a command is faster than the GUI. When the task is complete, reply with a one-line summary and stop.`,
 			toolFactory: () =>
 				[computerTool, new DaytonaExecuteTool(taskPlatform)] as Tool[],
-			maxToolRounds: task.maxRounds ?? args.maxRounds,
 		});
 		const controller = new AbortController();
 		const timer = setTimeout(() => controller.abort(), 8 * 60 * 1000);
@@ -409,6 +407,14 @@ async function runTask(
 			const result = await runner.run({
 				prompt: task.instruction,
 				depth: 1,
+				definition: {
+					name: `cua-eval-${task.id}`,
+					description: "Run a computer-use evaluation task.",
+					mode: "worker",
+					systemPrompt: `${computerSystemPrompt.prompt}\n\nYou are operating a Linux XFCE desktop. The Execute tool runs shell commands inside the same machine; use it whenever a command is faster than the GUI. When the task is complete, reply with a one-line summary and stop.`,
+					maxRounds: task.maxRounds ?? args.maxRounds,
+					source: "built-in",
+				},
 				parentCwd: "/home/daytona",
 				parentSignal: controller.signal,
 				parentPermissions: {

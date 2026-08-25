@@ -290,6 +290,7 @@ describe("SubAgentRunner", () => {
 		const result = await runner.run({
 			prompt: "keep using tools",
 			depth: 1,
+			definition: TEST_DEFINITION,
 			parentCwd: process.cwd(),
 			parentSignal: new AbortController().signal,
 		});

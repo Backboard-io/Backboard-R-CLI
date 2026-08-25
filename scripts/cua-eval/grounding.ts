@@ -161,7 +161,6 @@ for (const file of files) {
 		memoryProfile: config.memoryProfile,
 		getThinking: () => resolveRuntimeThinking(config, client),
 		getThinkingResolver: () => createRuntimeThinkingResolver(config, client),
-		systemPrompt: `${computerSystemPrompt.prompt}\n\nDo exactly one thing: take a screenshot, then perform the single click the user asks for, then stop and say "done".`,
 		toolFactory: () => [tool] as Tool[],
 	});
 	const started = performance.now();
@@ -172,6 +171,13 @@ for (const file of files) {
 		const result = await runner.run({
 			prompt: fixture.instruction,
 			depth: 1,
+			definition: {
+				name: "grounding-eval",
+				description: "Evaluate one screenshot-grounded click.",
+				mode: "worker",
+				systemPrompt: `${computerSystemPrompt.prompt}\n\nDo exactly one thing: take a screenshot, then perform the single click the user asks for, then stop and say "done".`,
+				source: "built-in",
+			},
 			parentCwd: process.cwd(),
 			parentSignal: AbortSignal.timeout(120_000),
 			parentBus: bus,

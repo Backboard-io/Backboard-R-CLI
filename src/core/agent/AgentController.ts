@@ -1,7 +1,9 @@
 import type { Config } from "../../config/Config.ts";
+import { formatModel } from "../../config/defaults.ts";
 import { qSessionDir } from "../../config/paths.ts";
 import { createRuntimeThinkingResolver } from "../../config/thinkingRuntime.ts";
 import { toPromptProfileId } from "../../prompts/profiles/ids.ts";
+import { buildExpertModePrompt } from "../../prompts/system/expertMode.tsx";
 import { getSystemPrompt } from "../../prompts/system/index.tsx";
 import { TODO_NOT_CALLED_REMINDER } from "../../prompts/todoReminders.ts";
 import type { AgentClient } from "../../providers/AgentClient.ts";
@@ -41,15 +43,25 @@ import type { OpenAITool } from "../tools/schema.ts";
 import type { ToolContext } from "../tools/ToolContext.ts";
 import type { ToolRegistry } from "../tools/ToolRegistry.ts";
 import type { ToolScheduler } from "../tools/ToolScheduler.ts";
-import type {
-	CancelOptions,
-	QueuedSubmit,
-	SubmitOptions,
+import {
+	type CancelOptions,
+	type QueuedSubmit,
+	SUBMIT_PRIORITY_ORDER,
+	type SubmitOptions,
+	type SubmitPriority,
 } from "./AgentControllerTypes.ts";
 import { AgentLoopFactory } from "./AgentLoopFactory.ts";
 import { AgentTraceContext } from "./AgentTraceStore.ts";
 import { AssistantSessionBinding } from "./AssistantSessionBinding.ts";
+import type { BackgroundAgentSupervisor } from "./BackgroundAgentSupervisor.ts";
 import { Turn } from "./Turn.ts";
+
+/**
+ * How long `dispose()` and a session replacement wait for a cancelled turn to
+ * unwind before proceeding anyway. Bounded so an unresponsive tool cannot
+ * wedge exit, /new or /sessions.
+ */
+const CANCELLED_TURN_SETTLE_MS = 5_000;
 
 export interface AgentControllerDeps {
 	config: Config;
@@ -71,6 +83,8 @@ export interface AgentControllerDeps {
 	};
 	onThreadReplaced?: (threadId: string | null) => void;
 	permissions: PermissionContext;
+	/** Stopped when the thread is reset, so stale reports never land. */
+	backgroundSupervisor?: Pick<BackgroundAgentSupervisor, "cancelAll">;
 	/**
 	 * Absolute path to this run's client transcript. Named in the handoff so a
 	 * compressed agent can read back anything the summary left out.
@@ -92,6 +106,8 @@ export class AgentController {
 	private readonly detachSessionProjection: () => void;
 	private readonly queue: QueuedSubmit[] = [];
 	private drainingQueue = false;
+	/** The in-flight drain, so shutdown can await the turn it is running. */
+	private drainPromise: Promise<void> | null = null;
 	private sessionHooksStarted = false;
 
 	constructor(private readonly deps: AgentControllerDeps) {
@@ -180,15 +196,51 @@ export class AgentController {
 		return this.deps.config.isBrowserUseEnabled;
 	}
 
+	/**
+	 * Stops everything bound to the outgoing session and waits for its turn to
+	 * unwind. MUST be awaited before the durable session's checkpoint and
+	 * event-log roots are rotated: a run that finishes inside that activation
+	 * window would otherwise start its report turn — and execute its tools —
+	 * against the replacement storage. Cancelling only signals, so a turn in an
+	 * abort-insensitive or already-committing tool needs the settle too.
+	 * Background runs are only signalled: their checkpoint access was revoked
+	 * at handoff, so nothing they do afterwards can reach either journal.
+	 */
+	async beginSessionReplacement(): Promise<void> {
+		this.signalSessionReplacement();
+		await this.settle(CANCELLED_TURN_SETTLE_MS);
+	}
+
+	/**
+	 * The cancellation half, for callers that run after activation and so have
+	 * nothing left to wait for.
+	 */
+	private signalSessionReplacement(): void {
+		// Cancel the runs first: a run cancelled here can never reach the
+		// notifier, and anything that already did is dropped with the queue.
+		this.deps.backgroundSupervisor?.cancelAll();
+		this.cancel({ clearQueue: true });
+	}
+
 	hydrateSession(input: {
 		threadId: string;
 		assistantId?: string | null;
 		messages: readonly Message[];
 	}): void {
+		// A just-finished background run may already have queued its report
+		// turn here; cancel it so it cannot land in the resumed conversation.
+		// Storage has already rotated by this point, so there is nothing to
+		// await — `beginSessionReplacement` guarded that window.
+		this.signalSessionReplacement();
 		this.deps.session.hydrate(input);
 	}
 
 	async dispose(): Promise<void> {
+		// Teardown must not race a turn that is still unwinding — a background
+		// report can start one at any moment, and it would keep touching the
+		// tools, logs, and checkpoints being closed here.
+		this.cancel({ clearQueue: true });
+		await this.settle(CANCELLED_TURN_SETTLE_MS);
 		// Pair SessionEnd with SessionStart: only fire it if the session started.
 		if (this.sessionHooksStarted) {
 			await this.runTerminalHook((signal) =>
@@ -200,7 +252,7 @@ export class AgentController {
 	}
 
 	async submit(text: string, options: SubmitOptions = {}): Promise<TurnStatus> {
-		return this.enqueueSubmit(text, "back", {
+		return this.enqueueSubmit(text, options.priority ?? "next", {
 			emitUserMessage: options.emitUserMessage ?? true,
 			onStart: options.onStart,
 			attachmentFilePaths: options.attachmentFilePaths,
@@ -210,7 +262,7 @@ export class AgentController {
 
 	async steer(text: string, options: SubmitOptions = {}): Promise<TurnStatus> {
 		const shouldCancelActiveTurn = this.abortController !== null;
-		const run = this.enqueueSubmit(text, "front", {
+		const run = this.enqueueSubmit(text, "now", {
 			emitUserMessage: options.emitUserMessage ?? false,
 			onStart: options.onStart,
 			attachmentFilePaths: options.attachmentFilePaths,
@@ -222,37 +274,79 @@ export class AgentController {
 
 	private enqueueSubmit(
 		text: string,
-		placement: "front" | "back",
+		priority: SubmitPriority,
 		options: Required<Pick<SubmitOptions, "emitUserMessage">> &
 			Pick<SubmitOptions, "onStart" | "attachmentFilePaths" | "displayContent">,
 	): Promise<TurnStatus> {
 		const run = new Promise<TurnStatus>((resolve, reject) => {
-			const queued = {
+			this.queue.push({
 				text,
+				priority,
 				emitUserMessage: options.emitUserMessage,
 				onStart: options.onStart,
 				attachmentFilePaths: options.attachmentFilePaths,
 				displayContent: options.displayContent,
 				resolve,
 				reject,
-			};
-			if (placement === "front") {
-				this.queue.unshift(queued);
-			} else {
-				this.queue.push(queued);
-			}
+			});
 		});
 		void this.drainSubmitQueue();
 		return run;
 	}
 
-	private async drainSubmitQueue(): Promise<void> {
-		if (this.drainingQueue) return;
+	/**
+	 * Removes the highest-priority submission, FIFO within a tier. Selection
+	 * happens at drain time rather than insert time so a `now` steer queued
+	 * behind a `later` report still runs first.
+	 */
+	private takeNextSubmit(): QueuedSubmit | undefined {
+		let bestIndex = -1;
+		let bestRank = Number.POSITIVE_INFINITY;
+		for (const [index, queued] of this.queue.entries()) {
+			const rank = SUBMIT_PRIORITY_ORDER[queued.priority];
+			if (rank < bestRank) {
+				bestIndex = index;
+				bestRank = rank;
+			}
+		}
+		if (bestIndex === -1) return undefined;
+		return this.queue.splice(bestIndex, 1)[0];
+	}
+
+	/**
+	 * Resolves once no turn is running and the submit queue is empty, or once
+	 * `timeoutMs` elapses — a tool or stream that ignores its abort signal must
+	 * not be able to hold the process open forever.
+	 */
+	async settle(timeoutMs?: number): Promise<void> {
+		const deadline = timeoutMs === undefined ? null : Date.now() + timeoutMs;
+		while (this.drainPromise) {
+			const drained = this.drainPromise.then(
+				() => true,
+				() => true,
+			);
+			if (deadline === null) {
+				await drained;
+				continue;
+			}
+			const remaining = deadline - Date.now();
+			if (remaining <= 0) return;
+			if (!(await Promise.race([drained, expireAfter(remaining)]))) return;
+		}
+	}
+
+	private drainSubmitQueue(): Promise<void> {
+		if (this.drainingQueue) return this.drainPromise ?? Promise.resolve();
 		this.drainingQueue = true;
+		this.drainPromise = this.drainQueuedSubmits();
+		return this.drainPromise;
+	}
+
+	private async drainQueuedSubmits(): Promise<void> {
 		try {
 			while (this.queue.length > 0) {
-				const queued = this.queue.shift();
-				if (!queued) continue;
+				const queued = this.takeNextSubmit();
+				if (!queued) break;
 				try {
 					queued.onStart?.();
 					queued.resolve(
@@ -268,6 +362,7 @@ export class AgentController {
 			}
 		} finally {
 			this.drainingQueue = false;
+			this.drainPromise = null;
 			if (this.queue.length > 0) void this.drainSubmitQueue();
 		}
 	}
@@ -360,6 +455,13 @@ export class AgentController {
 					computerUseEnabled: config.isComputerUseEnabled,
 					browserUseEnabled: config.isBrowserUseEnabled,
 					skillDiscoveryEnabled: config.isSkillDiscoveryEnabled,
+					...(config.isExpertModeEnabled
+						? {
+								expertModePrompt: buildExpertModePrompt(
+									formatModel(config.executionModel),
+								),
+							}
+						: {}),
 					startupEnvironmentPrompt: this.deps.startupEnvironmentPrompt,
 					hookContext: joinHookContext(
 						this.deps.hookController?.baseContext,
@@ -610,7 +712,10 @@ export class AgentController {
 
 	/** Cancels any active turn and starts a fresh Backboard thread. */
 	newThread(): void {
-		this.cancel({ clearQueue: true });
+		// Background agents were spawned to serve the discarded conversation;
+		// letting them report into the new thread would reference context that
+		// no longer exists.
+		this.signalSessionReplacement();
 		this.deps.session.reset();
 	}
 
@@ -703,6 +808,14 @@ export class AgentController {
 			}
 		}
 	}
+}
+
+/** Resolves `false` after `ms`, without holding the event loop open. */
+function expireAfter(ms: number): Promise<boolean> {
+	return new Promise((resolve) => {
+		const timer = setTimeout(() => resolve(false), ms);
+		timer.unref?.();
+	});
 }
 
 function formatSubmitError(err: unknown): string {

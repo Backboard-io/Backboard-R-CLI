@@ -6,6 +6,7 @@ import {
 	NO_CREDENTIALS_MESSAGE,
 	resolveAuth,
 } from "./auth.ts";
+import type { ExpertConfig } from "./BackboardConfigTypes.ts";
 import { readBackboardConfig, saveBackboardConfig } from "./backboardConfig.ts";
 import {
 	DEFAULTS,
@@ -85,8 +86,13 @@ export class Config {
 	private verboseEnabled = true;
 	private readonly currentMemoryProfile: MemoryProfile;
 	private currentThinking: ThinkingIntent | null | undefined;
+	private expertEnabled = false;
+	private expertModelRef: ModelRef | null = null;
+	private expertModelProfile: ModelProfile | null = null;
+	private expertThinking: ThinkingIntent | null | undefined;
 	private readonly currentFinalVerificationNudge: boolean;
 	private readonly excludedToolNames: string[];
+	private readonly configWarnings: string[] = [];
 	private readonly persistedConfigHomeDir: string | undefined;
 
 	constructor(options: ConfigOptions = {}) {
@@ -149,6 +155,25 @@ export class Config {
 				: parseThinking(this.flags.thinking);
 		this.currentFinalVerificationNudge =
 			this.flags.finalVerification ?? DEFAULTS.finalVerificationNudge;
+		const expert = persistedConfig.expert;
+		const expertModel = expert?.model ?? null;
+		const expertBackendMissing =
+			expert?.enabled === true &&
+			expertModel !== null &&
+			!this.hasBackendFor(expertModel);
+		this.expertEnabled = (expert?.enabled ?? false) && !expertBackendMissing;
+		this.expertModelRef = expertModel;
+		this.expertModelProfile = expertModel
+			? resolveModelProfile(expertModel)
+			: null;
+		this.expertThinking = expert?.thinking;
+		if (expertBackendMissing && expertModel) {
+			this.configWarnings.push(
+				`Expert mode is off: no enabled API key for its saved model ${formatModel(
+					expertModel,
+				)}. Pick a reachable model in /settings to turn it back on.`,
+			);
+		}
 		this.notifyEnabled = persistedConfig.notify ?? false;
 		this.verboseEnabled = persistedConfig.verbose ?? true;
 		this.excludedToolNames = parseExcludedTools(this.flags.excludedTools).map(
@@ -201,15 +226,43 @@ export class Config {
 		return this.toolPolicy.isRuntimeAllowed(name);
 	}
 
+	/** Runtime gate for tools a sub-agent runs; expert mode never narrows it. */
+	isDelegatedToolEnabled(name: string, model?: ModelRef): boolean {
+		return this.delegatedToolPolicyFor(model).isRuntimeAllowed(name);
+	}
+
 	get toolPolicy(): ToolPolicy {
+		return this.buildToolPolicy(this.isExpertModeEnabled);
+	}
+
+	/**
+	 * The sub-agent's policy: it does implement, so it keeps the implementation
+	 * tools and takes its allow/deny lists from the profile of the model it
+	 * runs on rather than the planner's — the execution model by default, or
+	 * the one a custom agent pins with `model:`. A Moonshot agent spawned from
+	 * an OpenAI session must not inherit the OpenAI profile's
+	 * `apply_patch`-instead-of-`edit` shape.
+	 */
+	delegatedToolPolicyFor(model?: ModelRef): ToolPolicy {
+		return this.buildToolPolicy(
+			false,
+			model ? resolveModelProfile(model) : this.executionModelProfile,
+		);
+	}
+
+	private buildToolPolicy(
+		expertModeEnabled: boolean,
+		modelProfile: ModelProfile = this.currentModelProfile,
+	): ToolPolicy {
 		return new ToolPolicy({
 			profileTools: this.profile.tools,
-			modelTools: this.currentModelProfile.tools,
+			modelTools: modelProfile.tools,
 			excludedTools: this.excludedToolNames,
-			modelExcludedTools: this.currentModelProfile.excludedTools,
+			modelExcludedTools: modelProfile.excludedTools,
 			computerUseEnabled: this.computerUseEnabled,
 			browserUseEnabled: this.browserUseEnabled,
 			skillDiscoveryEnabled: this.skillDiscoveryEnabled,
+			expertModeEnabled,
 		});
 	}
 
@@ -290,46 +343,126 @@ export class Config {
 		this.currentThinking = thinking;
 	}
 
+	/** On only once a model is picked — expert mode with no model is a no-op. */
+	get isExpertModeEnabled(): boolean {
+		return this.expertEnabled && this.expertModelRef !== null;
+	}
+
+	get expertModel(): ModelRef | null {
+		return this.expertModelRef;
+	}
+
+	/** The model that implements: the expert pick, else the `/model` selection. */
+	get executionModel(): ModelRef {
+		return this.isExpertModeEnabled && this.expertModelRef
+			? this.expertModelRef
+			: this.currentModel;
+	}
+
+	/** The profile of whichever model implements — it decides that model's tools. */
+	get executionModelProfile(): ModelProfile {
+		return this.isExpertModeEnabled && this.expertModelProfile
+			? this.expertModelProfile
+			: this.currentModelProfile;
+	}
+
+	get executionThinking(): ThinkingIntent | null | undefined {
+		return this.isExpertModeEnabled
+			? this.expertThinking
+			: this.currentThinking;
+	}
+
+	/** Omitting `model` keeps the remembered pick, so off/on needs no re-pick. */
+	setExpertMode(next: {
+		enabled: boolean;
+		model?: ModelRef | null;
+		thinking?: ThinkingIntent | null | undefined;
+	}): void {
+		this.expertEnabled = next.enabled;
+		if (next.model !== undefined) {
+			this.expertModelRef = next.model;
+			this.expertModelProfile = next.model
+				? resolveModelProfile(next.model)
+				: null;
+		}
+		if ("thinking" in next) this.expertThinking = next.thinking;
+	}
+
+	private saveQueue: Promise<void> = Promise.resolve();
+
+	private enqueueSave(op: () => Promise<void>): Promise<void> {
+		const next = this.saveQueue.then(op);
+		this.saveQueue = next.catch(() => undefined);
+		return next;
+	}
+
 	async saveRuntimeSelection(): Promise<void> {
-		const existing = readBackboardConfig(this.persistedConfigHomeDir);
-		await saveBackboardConfig(
-			{
-				...existing,
-				...(this.flags.model === undefined ? { model: this.currentModel } : {}),
-				...(this.flags.thinking === undefined
-					? { thinking: this.currentThinking }
-					: {}),
-				...(this.flags.memory === undefined
-					? { memory: this.currentMemory }
-					: {}),
-				...(this.flags.memoryProfile === undefined
-					? { memoryProfile: this.currentMemoryProfile }
-					: {}),
-			},
-			this.persistedConfigHomeDir,
-		);
+		await this.enqueueSave(async () => {
+			const existing = readBackboardConfig(this.persistedConfigHomeDir);
+			await saveBackboardConfig(
+				{
+					...existing,
+					...(this.flags.model === undefined
+						? { model: this.currentModel }
+						: {}),
+					...(this.flags.thinking === undefined
+						? { thinking: this.currentThinking }
+						: {}),
+					...(this.flags.memory === undefined
+						? { memory: this.currentMemory }
+						: {}),
+					...(this.flags.memoryProfile === undefined
+						? { memoryProfile: this.currentMemoryProfile }
+						: {}),
+				},
+				this.persistedConfigHomeDir,
+			);
+		});
+	}
+
+	async saveExpertPreference(): Promise<void> {
+		await this.enqueueSave(async () => {
+			const existing = readBackboardConfig(this.persistedConfigHomeDir);
+			const expert: ExpertConfig = { enabled: this.expertEnabled };
+			if (this.expertModelRef) expert.model = this.expertModelRef;
+			if (this.expertThinking !== undefined) {
+				expert.thinking = this.expertThinking;
+			}
+			await saveBackboardConfig(
+				{ ...existing, expert },
+				this.persistedConfigHomeDir,
+			);
+		});
 	}
 
 	async saveNotifyPreference(): Promise<void> {
-		const existing = readBackboardConfig(this.persistedConfigHomeDir);
-		await saveBackboardConfig(
-			{
-				...existing,
-				notify: this.notifyEnabled,
-			},
-			this.persistedConfigHomeDir,
-		);
+		await this.enqueueSave(async () => {
+			const existing = readBackboardConfig(this.persistedConfigHomeDir);
+			await saveBackboardConfig(
+				{
+					...existing,
+					notify: this.notifyEnabled,
+				},
+				this.persistedConfigHomeDir,
+			);
+		});
 	}
 
 	async saveVerbosePreference(): Promise<void> {
-		const existing = readBackboardConfig(this.persistedConfigHomeDir);
-		await saveBackboardConfig(
-			{
-				...existing,
-				verbose: this.verboseEnabled,
-			},
-			this.persistedConfigHomeDir,
-		);
+		await this.enqueueSave(async () => {
+			const existing = readBackboardConfig(this.persistedConfigHomeDir);
+			await saveBackboardConfig(
+				{
+					...existing,
+					verbose: this.verboseEnabled,
+				},
+				this.persistedConfigHomeDir,
+			);
+		});
+	}
+
+	get startupWarnings(): readonly string[] {
+		return this.configWarnings;
 	}
 
 	get hasBackboardAuth(): boolean {
@@ -342,6 +475,10 @@ export class Config {
 
 	hasProviderKeyFor(provider: string): boolean {
 		return this.auth.providerKeys.some((entry) => entry.provider === provider);
+	}
+
+	private hasBackendFor(model: ModelRef): boolean {
+		return this.hasBackboardAuth || this.hasProviderKeyFor(model.provider);
 	}
 
 	get hasBackendForCurrentModel(): boolean {
@@ -362,6 +499,13 @@ export class Config {
 		const next = this.auth.backboard ?? anonymousEnv();
 		this.env.apiKey = next.apiKey;
 		this.env.apiUrl = next.apiUrl;
+		if (
+			this.expertEnabled &&
+			this.expertModelRef &&
+			!this.hasBackendFor(this.expertModelRef)
+		) {
+			this.expertEnabled = false;
+		}
 		return this.auth;
 	}
 

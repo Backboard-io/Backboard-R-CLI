@@ -9,6 +9,11 @@ import {
 	genericInputSummary,
 } from "../core/tools/inputSummary.ts";
 import { toDisplayToolName } from "../core/tools/names.ts";
+import {
+	AGENT_REPORT_PREVIEW_LINES,
+	AGENT_REPORT_PREVIEW_WIDTH,
+	buildOutputPreview,
+} from "../core/tools/outputPreview.ts";
 import { shortId } from "../utils/id.ts";
 import { clampFlushLengthForOpenTable } from "../utils/markdownTable.ts";
 import type {
@@ -182,6 +187,20 @@ export function reduce(state: AppState, event: AgentEvent): AppState {
 			);
 			return tool?.kind === "tool" ? pushLive(next, tool) : next;
 		}
+
+		case "agent:background_started":
+			return {
+				...state,
+				backgroundAgents: [...state.backgroundAgents, event.run],
+			};
+
+		case "agent:background_finished":
+			return {
+				...state,
+				backgroundAgents: state.backgroundAgents.filter(
+					(run) => run.id !== event.run.id,
+				),
+			};
 
 		case "agent:child_tool_result": {
 			if (isToolCommittedTerminal(state, event.agentToolCallId)) return state;
@@ -448,10 +467,14 @@ function agentToolResultDetail(output: AgentToolOutput): string | undefined {
 	]
 		.filter(Boolean)
 		.join(", ");
-	const detail = `${meta}\n${output.report}`;
-	return detail.length > 4_000
-		? `${detail.slice(0, 4_000)}\n[truncated]`
-		: detail;
+	// The transcript renderer truncates each line to the terminal width, so cap
+	// line count and width here rather than emitting a raw slice that shreds
+	// wide markdown. The full report reaches the model and the trace file.
+	const preview = buildOutputPreview(output.report, {
+		maxLines: AGENT_REPORT_PREVIEW_LINES,
+		maxLineWidth: AGENT_REPORT_PREVIEW_WIDTH,
+	});
+	return preview ? `${meta}\n${preview}` : meta;
 }
 
 function push(state: AppState, item: TranscriptItem): AppState {

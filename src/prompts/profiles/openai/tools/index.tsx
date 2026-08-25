@@ -361,7 +361,7 @@ Prompt requirements:
 
 | Name | Type | Required | Description |
 | --- | --- | --- | --- |
-| \`subagent_type\` | \`string enum: worker, rlm\` | no | worker uses tools; rlm analyzes structured inputs in a JavaScript REPL and must finish with SUBMIT(answer). |
+| \`subagent_type\` | \`string\` | no | Which agent to run; see "Available agents" below. Defaults to worker, which uses tools. An rlm agent instead analyzes structured inputs in a JavaScript REPL and must finish with SUBMIT(answer). |
 | \`prompt\` | \`string\` | yes | Complete delegated task. |
 | \`variables\` | \`object\` | no | Structured inputs for rlm sub-agents. |
 | \`timeout_ms\` | \`number\` | no | Wall-clock budget in milliseconds. |`.trim();

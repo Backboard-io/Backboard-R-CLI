@@ -65,6 +65,114 @@ function makeCtx(opts: {
 	};
 }
 
+describe("escalated permission prompts", () => {
+	const pctxWith = (
+		escalate: PermissionContext["escalate"],
+	): PermissionContext => ({
+		mode: "manual",
+		rules: parseRuleSet({}),
+		interactive: false,
+		escalate,
+	});
+
+	it("routes a non-interactive ask through the escalation channel", async () => {
+		const cwd = await tempProject();
+		const ctx = makeCtx({
+			cwd,
+			permissions: pctxWith(() => async () => ALLOW_ONCE),
+		});
+		const result = await resolveToolPermission(
+			new MutatingTool(),
+			{ command: "touch a" },
+			ctx,
+		);
+		expect(result.allowed).toBe(true);
+	});
+
+	it("denies the ask when the escalation channel is gone", async () => {
+		const cwd = await tempProject();
+		const ctx = makeCtx({ cwd, permissions: pctxWith(() => null) });
+		const result = await resolveToolPermission(
+			new MutatingTool(),
+			{ command: "touch a" },
+			ctx,
+		);
+		expect(result.allowed).toBe(false);
+		expect(result.denialReason).toContain("unavailable");
+	});
+
+	it("still denies without any escalation channel", async () => {
+		const cwd = await tempProject();
+		const ctx = makeCtx({ cwd, permissions: pctxWith(undefined) });
+		const result = await resolveToolPermission(
+			new MutatingTool(),
+			{ command: "touch a" },
+			ctx,
+		);
+		expect(result.allowed).toBe(false);
+	});
+
+	it("denies an approval that lands after the chain backgrounds", async () => {
+		const cwd = await tempProject();
+		let backgrounded = false;
+		const ctx = makeCtx({
+			cwd,
+			permissions: pctxWith(() =>
+				backgrounded
+					? null
+					: async () => {
+							backgrounded = true;
+							return ALLOW_ONCE;
+						},
+			),
+		});
+		const result = await resolveToolPermission(
+			new MutatingTool(),
+			{ command: "touch a" },
+			ctx,
+		);
+		expect(result.allowed).toBe(false);
+		expect(result.denialReason).toContain("unavailable");
+	});
+
+	it("settles an escalated prompt aborted by handoff as a denial", async () => {
+		const cwd = await tempProject();
+		let backgrounded = false;
+		const ctx = makeCtx({
+			cwd,
+			permissions: pctxWith(() =>
+				backgrounded
+					? null
+					: async () => {
+							backgrounded = true;
+							throw new Error("aborted");
+						},
+			),
+		});
+		const result = await resolveToolPermission(
+			new MutatingTool(),
+			{ command: "touch a" },
+			ctx,
+		);
+		expect(result.allowed).toBe(false);
+		expect(result.denialReason).toContain("unavailable");
+	});
+
+	it("honors a deny answer from the escalated prompt", async () => {
+		const cwd = await tempProject();
+		const ctx = makeCtx({
+			cwd,
+			permissions: pctxWith(() => async () => DENY),
+		});
+		const result = await resolveToolPermission(
+			new MutatingTool(),
+			{ command: "touch a" },
+			ctx,
+		);
+		expect(result.allowed).toBe(false);
+	});
+});
+
 describe("suggestRule", () => {
 	it("builds a two-token prefix rule for commands", () => {
 		expect(suggestRule("execute", "cargo build --release")).toBe(

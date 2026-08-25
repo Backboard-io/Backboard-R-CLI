@@ -27,7 +27,10 @@ import {
 	qUserHookConfigPath,
 	qUserMcpConfigPath,
 } from "../src/config/paths.ts";
-import { setProviderKey } from "../src/core/keys/ProviderKeyStore.ts";
+import {
+	setProviderKey,
+	setProviderKeyEnabled,
+} from "../src/core/keys/ProviderKeyStore.ts";
 
 const env = { apiKey: "test-key", apiUrl: "https://example.test/api" };
 
@@ -51,6 +54,65 @@ describe("Config", () => {
 		expect(config.thinking).toEqual({ kind: "level", level: "high" });
 		expect(config.memory).toBe("auto");
 		expect(config.memoryProfile).toBe("code");
+	});
+
+	it("disables persisted expert mode when its provider has no enabled key", async () => {
+		await withBackboardEnv({}, async () => {
+			const homeDir = await mkdtemp(path.join(os.tmpdir(), "cli-config-"));
+			await saveBackboardConfig(
+				{
+					model: { provider: "anthropic", model: "claude-opus-4.8" },
+					expert: {
+						enabled: true,
+						model: { provider: "openai", model: "gpt-6" },
+					},
+				},
+				homeDir,
+			);
+			await setProviderKey("anthropic", "sk-a", homeDir);
+
+			const config = new Config({ argv: [], homeDir });
+			expect(config.isExpertModeEnabled).toBe(false);
+			expect(config.expertModel).toEqual({
+				provider: "openai",
+				model: "gpt-6",
+			});
+			expect(config.startupWarnings).toHaveLength(1);
+
+			await setProviderKey("openai", "sk-o", homeDir);
+			const reopened = new Config({ argv: [], homeDir });
+			expect(reopened.isExpertModeEnabled).toBe(true);
+			expect(reopened.startupWarnings).toHaveLength(0);
+		});
+	});
+
+	it("disables expert mode when an auth refresh drops its provider key", async () => {
+		await withBackboardEnv({}, async () => {
+			const homeDir = await mkdtemp(path.join(os.tmpdir(), "cli-config-"));
+			await saveBackboardConfig(
+				{
+					model: { provider: "anthropic", model: "claude-opus-4.8" },
+					expert: {
+						enabled: true,
+						model: { provider: "openai", model: "gpt-6" },
+					},
+				},
+				homeDir,
+			);
+			await setProviderKey("anthropic", "sk-a", homeDir);
+			await setProviderKey("openai", "sk-o", homeDir);
+
+			const config = new Config({ argv: [], homeDir });
+			expect(config.isExpertModeEnabled).toBe(true);
+
+			await setProviderKeyEnabled("openai", false, homeDir);
+			config.refreshAuth();
+			expect(config.isExpertModeEnabled).toBe(false);
+			expect(config.expertModel).toEqual({
+				provider: "openai",
+				model: "gpt-6",
+			});
+		});
 	});
 
 	it("persists a stable project workspace id in the project config", async () => {

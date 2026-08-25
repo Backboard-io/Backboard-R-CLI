@@ -12,7 +12,9 @@ export function toolStartEvent(
 	const inputSummary = summarizeToolInput(input, tool);
 	const name = tool?.displayName ?? ref.name;
 	const agentMode =
-		tool?.agentName === "agent" ? agentModeFromInput(input) : undefined;
+		tool?.agentName === "agent"
+			? (tool.agentModeForInput(input) ?? agentModeFromInput(input))
+			: undefined;
 	return {
 		type: "tool:start",
 		toolCallId: ref.id,

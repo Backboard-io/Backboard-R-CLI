@@ -13,6 +13,18 @@ export interface BackboardConfigFile {
 	memoryProfile?: MemoryProfile;
 	notify?: boolean;
 	verbose?: boolean;
+	/** Expert mode: implementation runs on `model`, planning stays on `/model`. */
+	expert?: ExpertConfig;
+}
+
+export interface ExpertConfig {
+	enabled: boolean;
+	/** Remembered across an off/on cycle, so the picker only runs once. */
+	model?: {
+		provider: string;
+		model: string;
+	};
+	thinking?: ThinkingIntent | null;
 }
 
 export interface LoadEnvOptions {

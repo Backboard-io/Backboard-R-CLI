@@ -42,10 +42,24 @@ const REDO_TOOL = "redo-point";
 /** A begin walk is skipped when a storing refresh completed this recently. */
 const BEGIN_SKIP_FRESH_MS = 2_000;
 
+/** A journaled pre/skip entry, identified so a later revoke can drop it. */
+export interface CapturedEntry {
+	/** Root of the session whose journal holds the entry; `ref` is only meaningful there. */
+	journalRoot: string;
+	turnId: string;
+	/** `seq` of the journaled entry. */
+	ref: number;
+	path: string;
+}
+
 /** The slice of ToolContext the checkpoint engine needs at capture time. */
 export interface CheckpointCallContext {
 	turnId?: string;
 	toolCallId?: string;
+	/** Injected by revocable recorders; re-checked at commit time so an in-flight capture cannot journal after revocation. */
+	mayJournal?: () => boolean;
+	/** Injected by revocable recorders; reports a durable pre/skip entry whose write has not happened yet. */
+	onCaptured?: (entry: CapturedEntry) => void;
 }
 
 export interface RecordPreImageOptions {
@@ -76,6 +90,8 @@ export interface CheckpointRecorder {
 		ctx: CheckpointCallContext,
 		contentIfInMemory?: Uint8Array,
 	): Promise<void>;
+	/** Neutralizes an already-journaled pre/skip entry with a `revoke` record. */
+	revokeCapture(entry: CapturedEntry): Promise<void>;
 	revertToolCall(toolCallId: string): Promise<void>;
 	/** Snapshots the workspace before a shell command (never throws). */
 	beginShellCapture(cwd: string, ctx: CheckpointCallContext): Promise<void>;
@@ -84,6 +100,115 @@ export interface CheckpointRecorder {
 	/** One-shot warning when shell capture disabled itself, else null. */
 	captureWarning(): string | null;
 	scopedToTurn(turnId: string): CheckpointRecorder;
+}
+
+export interface RevocableRecorder {
+	recorder: CheckpointRecorder;
+	/** Closes the gate and drops pre-images no post-image has settled. */
+	revoke: () => Promise<void>;
+}
+
+/**
+ * Wraps a recorder so journaling can be switched off after contexts holding it
+ * have already been copied. Used when a run outlives the turn it was scoped to.
+ */
+export function revocableRecorder(
+	recorder: CheckpointRecorder,
+): RevocableRecorder {
+	const gate = { live: true };
+	// Pre-images that are durable but whose write has not happened yet, keyed
+	// by capture. The write will now complete with its post-image suppressed;
+	// left alone, the turn's /undo would use the orphan pre-image to overwrite
+	// what the backgrounded run went on to write.
+	const pending = new Map<string, CapturedEntry>();
+	return {
+		revoke: async () => {
+			if (!gate.live) return;
+			gate.live = false;
+			// Best-effort, and every entry is attempted: the run has already been
+			// handed off by the time this runs, so a journal write failure must
+			// neither fail it nor leave the remaining entries in the checkpoint.
+			const entries = [...pending.values()];
+			pending.clear();
+			for (const entry of entries) {
+				await recorder.revokeCapture(entry).catch(() => {});
+			}
+		},
+		recorder: gatedRecorder(recorder, gate, pending),
+	};
+}
+
+function gatedRecorder(
+	recorder: CheckpointRecorder,
+	gate: { live: boolean },
+	pending: Map<string, CapturedEntry>,
+): CheckpointRecorder {
+	const noop = async (): Promise<void> => {};
+	const captureKey = (ctx: CheckpointCallContext, absPath: string): string =>
+		`${ctx.toolCallId ?? "unknown"} ${resolve(absPath)}`;
+	const gatedCtx = (
+		ctx: CheckpointCallContext,
+		key: string,
+	): CheckpointCallContext => ({
+		...ctx,
+		mayJournal: () => gate.live && ctx.mayJournal?.() !== false,
+		onCaptured: (entry) => {
+			ctx.onCaptured?.(entry);
+			pending.set(key, entry);
+		},
+	});
+	return {
+		recordPreImage: (absPath, ctx, opts) => {
+			if (gate.live) {
+				return recorder.recordPreImage(
+					absPath,
+					gatedCtx(ctx, captureKey(ctx, absPath)),
+					opts,
+				);
+			}
+			if (opts?.requireRevertible)
+				return Promise.reject(revokedCaptureError(absPath));
+			return noop();
+		},
+		recordPostImage: (absPath, ctx, contentIfInMemory) => {
+			// The write this reports has already happened. If its pre-image was
+			// captured while live, both belong to the turn: keep the pre-image
+			// and journal the post-image even if the gate closed in between, or
+			// /undo would either miss the write or restore it unchecked.
+			const key = captureKey(ctx, absPath);
+			if (pending.delete(key)) {
+				return recorder.recordPostImage(absPath, ctx, contentIfInMemory);
+			}
+			return gate.live
+				? recorder.recordPostImage(
+						absPath,
+						gatedCtx(ctx, key),
+						contentIfInMemory,
+					)
+				: noop();
+		},
+		revokeCapture: (entry) => recorder.revokeCapture(entry),
+		revertToolCall: (...args) => recorder.revertToolCall(...args),
+		beginShellCapture: (cwd, ctx) =>
+			gate.live ? recorder.beginShellCapture(cwd, gatedCtx(ctx, "")) : noop(),
+		// Delegated even after revocation: the injected `mayJournal` keeps the
+		// diff out of the journal, while the call still releases the workspace
+		// snapshot a live `beginShellCapture` allocated. Short-circuiting here
+		// would strand that snapshot for the rest of the session.
+		endShellCapture: (ctx) => recorder.endShellCapture(gatedCtx(ctx, "")),
+		captureWarning: () => (gate.live ? recorder.captureWarning() : null),
+		scopedToTurn: (turnId) =>
+			gatedRecorder(recorder.scopedToTurn(turnId), gate, pending),
+	};
+}
+
+/** Raised for a `requireRevertible` capture requested after (or racing) revocation. */
+function revokedCaptureError(path: string): Error {
+	return new Error(
+		`Pre-image of ${resolve(path)} cannot be captured: the run's checkpoint ` +
+			"access was revoked when it moved to the background, so the write " +
+			"could not be rolled back; aborting before any modification",
+	);
 }
 
 export function scopeCheckpointRecorder(
@@ -95,6 +220,7 @@ export function scopeCheckpointRecorder(
 			recorder.recordPreImage(absPath, { ...ctx, turnId }, opts),
 		recordPostImage: (absPath, ctx, contentIfInMemory) =>
 			recorder.recordPostImage(absPath, { ...ctx, turnId }, contentIfInMemory),
+		revokeCapture: (entry) => recorder.revokeCapture(entry),
 		revertToolCall: (toolCallId) => recorder.revertToolCall(toolCallId),
 		beginShellCapture: (cwd, ctx) =>
 			recorder.beginShellCapture(cwd, { ...ctx, turnId }),
@@ -144,8 +270,10 @@ export class CheckpointStore implements CheckpointRecorder {
 	private readonly turnIndex = new Map<string, TurnJournalRecord>();
 	/** turnIds with a finalize record; kept in step with `records`. */
 	private readonly finalizedTurns = new Set<string>();
-	/** turnIds that captured at least one pre/skip entry. */
-	private readonly turnsWithEntries = new Set<string>();
+	/** turnId -> count of its pre/skip entries that a revoke has not dropped. */
+	private readonly turnEntryCounts = new Map<string, number>();
+	/** `seq`s of pre/skip records neutralized by a `revoke` record. */
+	private readonly revokedSeqs = new Set<number>();
 	/** pathKey -> newest post record; kept in step with `records`. */
 	private readonly latestPostByPath = new Map<string, PostImageJournalRecord>();
 	private shellIndex: WorkspaceIndex | null = null;
@@ -223,11 +351,20 @@ export class CheckpointStore implements CheckpointRecorder {
 		const turnId = ctx.turnId ?? "detached";
 		const toolCallId = ctx.toolCallId ?? "unknown";
 		const tool = opts?.tool ?? "unknown";
-		this.ensureTurn(turnId);
+		// Re-checked after each await: an in-flight capture must not commit
+		// after revocation.
+		const revokedMidCapture = (): boolean => {
+			if (ctx.mayJournal?.() !== false) return false;
+			if (opts?.requireRevertible) throw revokedCaptureError(path);
+			return true;
+		};
 
 		const stats = await lstatOrNull(path);
+		if (revokedMidCapture()) return;
+		this.ensureTurn(turnId);
+		let entrySeq: number;
 		if (!stats) {
-			this.append({
+			entrySeq = this.append({
 				type: "pre",
 				turnId,
 				toolCallId,
@@ -239,7 +376,7 @@ export class CheckpointStore implements CheckpointRecorder {
 					: {}),
 			});
 		} else if (!stats.isFile()) {
-			this.append({
+			entrySeq = this.append({
 				type: "pre",
 				turnId,
 				toolCallId,
@@ -256,7 +393,7 @@ export class CheckpointStore implements CheckpointRecorder {
 						"not be rolled back; aborting before any modification",
 				);
 			}
-			this.append({
+			entrySeq = this.append({
 				type: "skip",
 				turnId,
 				toolCallId,
@@ -267,7 +404,8 @@ export class CheckpointStore implements CheckpointRecorder {
 		} else {
 			const content = await readFile(path);
 			const hash = await this.blobs.put(content);
-			this.append({
+			if (revokedMidCapture()) return;
+			entrySeq = this.append({
 				type: "pre",
 				turnId,
 				toolCallId,
@@ -281,6 +419,45 @@ export class CheckpointStore implements CheckpointRecorder {
 		}
 		// Write-ahead durability: the journal entry (and blob) must be on disk
 		// before the tool mutates the file. Flush errors abort the tool call.
+		await this.journal.flush();
+		const entry: CapturedEntry = {
+			journalRoot: this.paths.root,
+			turnId,
+			ref: entrySeq,
+			path,
+		};
+		// Revocation can still land while that flush is in flight. The entry is
+		// already durable and its post-image will now be suppressed, so drop it
+		// with a compensating record rather than leave an orphan pre-image the
+		// turn's /undo would use to revert the background run's write.
+		if (ctx.mayJournal?.() === false) {
+			await this.revokeCapture(entry);
+			if (opts?.requireRevertible) throw revokedCaptureError(path);
+			return;
+		}
+		// Still live, but the tool has not written yet. Hand the entry to the
+		// recorder so a revoke landing before the write can drop it too.
+		ctx.onCaptured?.(entry);
+	}
+
+	/**
+	 * Neutralizes an already-journaled pre/skip entry. Used when a run's
+	 * capture access is revoked after the entry became durable: its post-image
+	 * is suppressed from then on, so the orphan pre-image must not survive to
+	 * make /undo overwrite a write the turn no longer owns.
+	 */
+	async revokeCapture(entry: CapturedEntry): Promise<void> {
+		// A run can outlive a session switch (/new, /sessions) and revoke
+		// through the manager into whichever store is active by then; its seq
+		// means nothing here and would poison an unrelated record.
+		if (entry.journalRoot !== this.paths.root) return;
+		if (this.revokedSeqs.has(entry.ref)) return;
+		this.append({
+			type: "revoke",
+			turnId: entry.turnId,
+			ref: entry.ref,
+			path: entry.path,
+		});
 		await this.journal.flush();
 	}
 
@@ -296,7 +473,6 @@ export class CheckpointStore implements CheckpointRecorder {
 	): Promise<void> {
 		const path = resolve(absPath);
 		const turnId = ctx.turnId ?? "detached";
-		this.ensureTurn(turnId);
 
 		let postHash: string | null;
 		if (contentIfInMemory) {
@@ -305,6 +481,8 @@ export class CheckpointStore implements CheckpointRecorder {
 			const stats = await lstatOrNull(path);
 			postHash = stats?.isFile() ? sha256Hex(await readFile(path)) : null;
 		}
+		if (ctx.mayJournal?.() === false) return;
+		this.ensureTurn(turnId);
 		this.append({
 			type: "post",
 			turnId,
@@ -324,6 +502,9 @@ export class CheckpointStore implements CheckpointRecorder {
 		const byPath = new Map<string, PreImageJournalRecord>();
 		for (const record of this.records) {
 			if (record.type !== "pre" || record.toolCallId !== toolCallId) continue;
+			// A revoked entry is still this tool call's own pre-image: revocation
+			// only detached it from the turn's checkpoint, and the rollback here
+			// only runs once every pre-image of the call has committed.
 			const key = this.pathKey(record.path);
 			if (!byPath.has(key)) byPath.set(key, record);
 		}
@@ -440,6 +621,8 @@ export class CheckpointStore implements CheckpointRecorder {
 				return;
 			}
 			this.shellLastStored = { snapshot: after, at: performance.now() };
+			// Revoked: keep the refreshed baseline, journal nothing.
+			if (ctx.mayJournal?.() === false) return;
 			const diff = this.shellIndex.diff(before, after);
 			const changes = [...diff.created, ...diff.modified, ...diff.deleted];
 			if (changes.length === 0) return;
@@ -566,6 +749,7 @@ export class CheckpointStore implements CheckpointRecorder {
 				record.type !== "post"
 			)
 				continue;
+			if (this.isRevoked(record)) continue;
 			const acc = byTurn.get(record.turnId);
 			if (!acc) continue;
 			const key = this.pathKey(record.path);
@@ -918,17 +1102,31 @@ export class CheckpointStore implements CheckpointRecorder {
 		} else if (record.type === "finalize") {
 			this.finalizedTurns.add(record.turnId);
 		} else if (record.type === "pre" || record.type === "skip") {
-			this.turnsWithEntries.add(record.turnId);
+			this.bumpTurnEntries(record.turnId, 1);
 		} else if (record.type === "post") {
 			this.latestPostByPath.set(this.pathKey(record.path), record);
+		} else if (record.type === "revoke") {
+			this.revokedSeqs.add(record.ref);
+			this.bumpTurnEntries(record.turnId, -1);
 		}
 	}
 
+	private bumpTurnEntries(turnId: string, delta: number): void {
+		const next = (this.turnEntryCounts.get(turnId) ?? 0) + delta;
+		this.turnEntryCounts.set(turnId, Math.max(0, next));
+	}
+
+	/** True if a `revoke` record dropped this pre/skip entry. */
+	private isRevoked(record: JournalRecord): boolean {
+		return this.revokedSeqs.has(record.seq);
+	}
+
+	/** Returns the `seq` stamped on the record, so it can be revoked later. */
 	private append<T extends JournalRecord["type"]>(
 		record: Omit<Extract<JournalRecord, { type: T }>, "seq" | "ts"> & {
 			type: T;
 		},
-	): void {
+	): number {
 		const full = {
 			...record,
 			seq: this.seq++,
@@ -937,6 +1135,7 @@ export class CheckpointStore implements CheckpointRecorder {
 		this.records.push(full);
 		this.indexRecord(full);
 		this.journal.write(full);
+		return full.seq;
 	}
 
 	private ensureTurn(turnId: string): void {
@@ -947,7 +1146,7 @@ export class CheckpointStore implements CheckpointRecorder {
 	private finalizeTurn(turnId: string, status: "ok" | "cancelled"): void {
 		if (!this.turnRecordFor(turnId)) return;
 		if (this.finalizedTurns.has(turnId)) return;
-		const hasEntries = this.turnsWithEntries.has(turnId);
+		const hasEntries = (this.turnEntryCounts.get(turnId) ?? 0) > 0;
 		this.append({
 			type: "finalize",
 			turnId,
@@ -980,7 +1179,8 @@ export class CheckpointStore implements CheckpointRecorder {
 			(record) =>
 				record.seq > seq &&
 				((record.type === "pre" && record.tool !== REDO_TOOL) ||
-					record.type === "skip"),
+					record.type === "skip") &&
+				!this.isRevoked(record),
 		);
 	}
 
@@ -998,6 +1198,7 @@ export class CheckpointStore implements CheckpointRecorder {
 		>();
 		for (const record of this.records) {
 			if (record.type !== "pre" && record.type !== "skip") continue;
+			if (this.isRevoked(record)) continue;
 			if (target.kind === "redo-point") {
 				if (record.turnId !== target.turnId) continue;
 			} else {

@@ -118,6 +118,68 @@ describe("createDefaultTools", () => {
 		);
 	});
 
+	it("runs worker subagents on the expert model with the tools to implement", async () => {
+		const config = new Config({ env: TEST_BACKBOARD_ENV, argv: [] });
+		config.setExpertMode({
+			enabled: true,
+			model: { provider: "moonshot", model: "kimi-k3" },
+		});
+		const client = new FakeClient([
+			{ kind: "thread", threadId: "thr_worker" },
+			{ kind: "assistant_delta", text: "worker report" },
+			{ kind: "completed" },
+		]);
+		const tools = createDefaultTools({ client, config });
+		const agent = tools.find((t): t is AgentTool => t.name === "Agent");
+
+		if (!agent) throw new Error("expected Agent tool");
+		await agent.execute({ prompt: "implement" }, context());
+
+		const request = client.messageRequests[0];
+		expect(request?.llm_provider).toBe("moonshot");
+		expect(request?.model_name).toBe("kimi-k3");
+		// The parent lost these to expert mode; the worker must still have them.
+		expect(toolNames(request?.tools ?? [])).toContain("edit");
+		expect(toolNames(request?.tools ?? [])).toContain("write");
+		expect(toolNames(request?.tools ?? [])).toContain("execute");
+	});
+
+	it("keeps nested workers on the expert model too", async () => {
+		const config = new Config({ env: TEST_BACKBOARD_ENV, argv: [] });
+		config.setExpertMode({
+			enabled: true,
+			model: { provider: "moonshot", model: "kimi-k3" },
+		});
+		const client = new FakeClient([
+			{ kind: "thread", threadId: "thr_worker_parent" },
+			{
+				kind: "requires_action",
+				runId: "run_parent",
+				calls: [
+					{
+						id: "call_agent",
+						name: "Agent",
+						input: { prompt: "nested implement", subagent_type: "worker" },
+					},
+				],
+			},
+			{ kind: "thread", threadId: "thr_worker_child" },
+			{ kind: "assistant_delta", text: "nested report" },
+			{ kind: "completed" },
+		]);
+		const tools = createDefaultTools({ client, config });
+		const agent = tools.find((t): t is AgentTool => t.name === "Agent");
+
+		if (!agent) throw new Error("expected Agent tool");
+		await agent.execute({ prompt: "implement" }, context());
+
+		expect(client.messageRequests).toHaveLength(2);
+		for (const request of client.messageRequests) {
+			expect(request.llm_provider).toBe("moonshot");
+			expect(request.model_name).toBe("kimi-k3");
+		}
+	});
+
 	it("does not execute stale hidden worker tool calls", async () => {
 		const config = new Config({
 			env: TEST_BACKBOARD_ENV,
@@ -178,10 +240,10 @@ describe("createDefaultTools", () => {
 
 		expect(client.messageRequests).toHaveLength(2);
 		expect(toolNames(client.messageRequests[0]?.tools ?? [])).not.toContain(
-			"Execute",
+			"execute",
 		);
 		expect(toolNames(client.messageRequests[1]?.tools ?? [])).not.toContain(
-			"Execute",
+			"execute",
 		);
 	});
 

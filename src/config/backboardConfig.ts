@@ -7,6 +7,7 @@ import type { JsonValue } from "../utils/JsonTypes.ts";
 import type {
 	BackboardConfigFile,
 	BackboardConfigJson,
+	ExpertConfig,
 } from "./BackboardConfigTypes.ts";
 import {
 	parseMemoryMode,
@@ -49,6 +50,7 @@ export function readBackboardConfig(
 			memoryProfile: readMemoryProfileConfig(config),
 			notify: typeof config.notify === "boolean" ? config.notify : undefined,
 			verbose: typeof config.verbose === "boolean" ? config.verbose : undefined,
+			expert: readExpertConfig(config),
 		};
 	} catch (err) {
 		if ((err as { code?: string }).code === "ENOENT") return {};
@@ -59,7 +61,12 @@ export function readBackboardConfig(
 function readModelConfig(
 	config: BackboardConfigJson,
 ): BackboardConfigFile["model"] {
-	const model = config.model;
+	return readModelRef(config.model);
+}
+
+function readModelRef(
+	model: JsonValue | undefined,
+): BackboardConfigFile["model"] {
 	if (typeof model !== "object" || model === null || Array.isArray(model)) {
 		return undefined;
 	}
@@ -99,7 +106,30 @@ function readThinkingConfig(
 	config: BackboardConfigJson,
 ): BackboardConfigFile["thinking"] {
 	if (!("thinking" in config)) return undefined;
-	const { thinking } = config;
+	return readThinkingValue(config.thinking);
+}
+
+function readExpertConfig(
+	config: BackboardConfigJson,
+): BackboardConfigFile["expert"] {
+	const expert = config.expert;
+	if (typeof expert !== "object" || expert === null || Array.isArray(expert)) {
+		return undefined;
+	}
+	const raw = expert as BackboardConfigJson;
+	const parsed: ExpertConfig = { enabled: raw.enabled === true };
+	const model = readModelRef(raw.model);
+	if (model) parsed.model = model;
+	if ("thinking" in raw) {
+		const thinking = readThinkingValue(raw.thinking);
+		if (thinking !== undefined) parsed.thinking = thinking;
+	}
+	return parsed;
+}
+
+function readThinkingValue(
+	thinking: JsonValue | undefined,
+): BackboardConfigFile["thinking"] {
 	if (thinking === null) return null;
 	if (
 		typeof thinking !== "object" ||

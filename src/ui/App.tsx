@@ -122,6 +122,7 @@ import {
 } from "./components/RewindSelector.tsx";
 import { SessionsSelector } from "./components/SessionsSelector.tsx";
 import {
+	type SettingsOpenId,
 	SettingsPanel,
 	type SettingsState,
 	type SettingsToggleId,
@@ -319,9 +320,16 @@ export function App({
 	const [loadingLabel, setLoadingLabel] = useState("Loading");
 	const [models, setModels] = useState<ModelInfo[]>([]);
 	const refreshCredentials = useCallback((): void => {
+		const wasExpert = config.isExpertModeEnabled;
 		refreshClientCredentials(config, client);
+		if (wasExpert && !config.isExpertModeEnabled) {
+			agent.notice(
+				"Expert mode is off: its model's provider key is no longer enabled.",
+				"warning",
+			);
+		}
 		setModels([]);
-	}, [config, client]);
+	}, [agent, config, client]);
 	// Every `/keys` change re-reads credentials into the live Config, so the
 	// next request routes through the new key set without a restart. The model
 	// list is dropped because which models exist depends on those keys.
@@ -333,6 +341,10 @@ export function App({
 		[refreshCredentials],
 	);
 	const [pendingModel, setPendingModel] = useState<ModelInfo | null>(null);
+	// One picker serves `/model` and expert mode; this says which one asked.
+	const [modelPickerTarget, setModelPickerTarget] = useState<"main" | "expert">(
+		"main",
+	);
 	const [contextReport, setContextReport] = useState<ContextReport | null>(
 		null,
 	);
@@ -571,19 +583,26 @@ export function App({
 		},
 		[agent, refreshSkillTabs, skillController],
 	);
+	const openModelPicker = useCallback(
+		(target: "main" | "expert") => {
+			setModelPickerTarget(target);
+			setLoadingLabel("Loading models");
+			setMode("loading");
+			void fetchModels(client)
+				.then((result) => {
+					setModels(result);
+					setMode("model");
+				})
+				.catch((err) => {
+					agent.notice(`Failed to load models: ${errorMessage(err)}`, "error");
+					setMode(target === "expert" ? "settings" : "normal");
+				});
+		},
+		[agent, client],
+	);
 	const openModelSelector = useCallback(() => {
-		setLoadingLabel("Loading models");
-		setMode("loading");
-		void fetchModels(client)
-			.then((result) => {
-				setModels(result);
-				setMode("model");
-			})
-			.catch((err) => {
-				agent.notice(`Failed to load models: ${errorMessage(err)}`, "error");
-				setMode("normal");
-			});
-	}, [agent, client]);
+		openModelPicker("main");
+	}, [openModelPicker]);
 	const openSkillsSelector = useCallback(() => {
 		setLoadingLabel("Loading skills");
 		setMode("loading");
@@ -969,8 +988,52 @@ export function App({
 		},
 		[openMcpRegistry],
 	);
+	const applyExpertSelection = useCallback(
+		async (selectedModel: ModelInfo, choice: ThinkingChoice) => {
+			if (controller.hasActiveWork) {
+				agent.notice(
+					"Finish or cancel the current turn before changing expert mode.",
+					"error",
+				);
+				setPendingModel(null);
+				setMode("settings");
+				return;
+			}
+			config.setExpertMode({
+				enabled: true,
+				model: {
+					provider: selectedModel.provider,
+					model: selectedModel.model,
+				},
+				thinking: choice.value,
+			});
+			try {
+				await config.saveExpertPreference();
+				agent.notice(
+					`Expert mode on — ${formatModel(config.model)} plans, ${formatModel(
+						selectedModel,
+					)} implements · thinking ${choice.label}`,
+				);
+			} catch (err) {
+				agent.notice(
+					`Expert mode is on for this session, but saving the selection failed: ${errorMessage(
+						err,
+					)}`,
+					"error",
+				);
+			} finally {
+				setPendingModel(null);
+				setMode("settings");
+			}
+		},
+		[agent, config, controller],
+	);
 	const applyModelSelection = useCallback(
 		async (selectedModel: ModelInfo, choice: ThinkingChoice) => {
+			if (modelPickerTarget === "expert") {
+				await applyExpertSelection(selectedModel, choice);
+				return;
+			}
 			controller.setModelContextLimit(selectedModel.contextLimit ?? null);
 			config.setModel({
 				provider: selectedModel.provider,
@@ -995,7 +1058,7 @@ export function App({
 				setMode("normal");
 			}
 		},
-		[agent, config, controller],
+		[agent, applyExpertSelection, config, controller, modelPickerTarget],
 	);
 	const applyModel = useCallback(
 		async (choice: ThinkingChoice) => {
@@ -1048,6 +1111,7 @@ export function App({
 						"A turn started while the session was loading. Cancel it before resuming.",
 					);
 				}
+				await controller.beginSessionReplacement();
 				await activateResumeTarget(target, {
 					config,
 					controller,
@@ -1300,6 +1364,42 @@ export function App({
 		setMemoryReturnsToSettings(true);
 		setMode("memory");
 	}, []);
+	// Enter on the Expert row turns it off when on, and opens the model picker
+	// when off. The pick is remembered, so an off/on cycle re-picks by choice.
+	const toggleExpertMode = useCallback(() => {
+		if (controller.hasActiveWork) {
+			agent.notice(
+				"Finish or cancel the current turn before changing expert mode.",
+				"error",
+			);
+			return;
+		}
+		if (!config.isExpertModeEnabled) {
+			openModelPicker("expert");
+			return;
+		}
+		config.setExpertMode({ enabled: false });
+		agent.notice(
+			`Expert mode off — ${formatModel(config.model)} implements again.`,
+		);
+		void config.saveExpertPreference().catch((err) => {
+			agent.notice(
+				`Failed to save expert preference: ${errorMessage(err)}`,
+				"error",
+			);
+		});
+		forceSettingsRender();
+	}, [agent, config, controller, openModelPicker]);
+	const openSettingsRow = useCallback(
+		(id: SettingsOpenId) => {
+			if (id === "memory") {
+				openMemoryFromSettings();
+				return;
+			}
+			toggleExpertMode();
+		},
+		[openMemoryFromSettings, toggleExpertMode],
+	);
 	const persistVerbose = useCallback(
 		(next: boolean) => {
 			config.setVerbose(next);
@@ -1359,10 +1459,16 @@ export function App({
 			toggleLsp,
 		],
 	);
+	const modelPickerReturnMode: Mode =
+		modelPickerTarget === "expert" ? "settings" : "normal";
 	const settingsState: SettingsState | null =
 		mode === "settings"
 			? {
 					memory: config.memory,
+					expert: {
+						enabled: config.isExpertModeEnabled,
+						model: config.expertModel ? formatModel(config.expertModel) : null,
+					},
 					verbose: config.isVerbose,
 					notify: config.isNotifyEnabled,
 					lsp: lsp.enabled,
@@ -1483,6 +1589,7 @@ export function App({
 					setLoadingLabel("Starting session");
 					setMode("loading");
 					void startNewSession({
+						detach: () => controller.beginSessionReplacement(),
 						activate: onNewSession,
 						resetThread: () => agent.newThread(),
 					})
@@ -1784,7 +1891,7 @@ export function App({
 								setPendingModel(model);
 								setMode("thinking");
 							}}
-							onCancel={() => setMode("normal")}
+							onCancel={() => setMode(modelPickerReturnMode)}
 						/>
 					) : mode === "thinking" ? (
 						pendingModel ? (
@@ -1793,7 +1900,7 @@ export function App({
 								onSelect={applyModel}
 								onCancel={() => {
 									setPendingModel(null);
-									setMode("normal");
+									setMode(modelPickerReturnMode);
 								}}
 							/>
 						) : null
@@ -1807,7 +1914,7 @@ export function App({
 						<SettingsPanel
 							state={settingsState}
 							onToggle={toggleSetting}
-							onOpenMemory={openMemoryFromSettings}
+							onOpen={openSettingsRow}
 							onClose={closeSettings}
 						/>
 					) : mode === "skills" ? (
@@ -2023,6 +2130,7 @@ export function App({
 								model={agent.state.model}
 								thinking={config.thinking}
 								permissionMode={agent.state.permissionMode}
+								backgroundAgents={agent.state.backgroundAgents}
 							/>
 						</>
 					)}

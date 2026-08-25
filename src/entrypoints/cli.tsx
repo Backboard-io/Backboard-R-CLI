@@ -18,6 +18,8 @@ import {
 	parseRequestedResume,
 } from "../config/resumePreflight.ts";
 import { AgentController } from "../core/agent/AgentController.ts";
+import { BackgroundAgentSupervisor } from "../core/agent/BackgroundAgentSupervisor.ts";
+import { discoverAgents } from "../core/agents/discovery.ts";
 import { AttachmentManager } from "../core/attachments/AttachmentManager.ts";
 import { sweepStaleClipboardImages } from "../core/attachments/clipboardImage.ts";
 import {
@@ -342,9 +344,12 @@ async function main(): Promise<void> {
 	// MCP init warnings (unset env vars, skipped/failed servers) are deliberately
 	// kept out of the startup surface — they cluttered every launch. Server status
 	// is still inspectable via /mcp; only the noisy startup emission is dropped.
+	const agentCatalog = await discoverAgents({ cwd: config.cwd });
 	const startupWarnings = [
+		...config.startupWarnings,
 		...hookConfig.warnings,
 		...permissionWarnings,
+		...agentCatalog.warnings,
 		...renderWarnings,
 		...resumeWarnings,
 	];
@@ -362,6 +367,7 @@ async function main(): Promise<void> {
 		},
 	});
 	const skillController = new SkillController({ cwd: config.cwd, bus });
+	const backgroundSupervisor = new BackgroundAgentSupervisor(bus);
 	registry = new ToolRegistry(
 		createDefaultTools({
 			client,
@@ -371,6 +377,11 @@ async function main(): Promise<void> {
 			checkpoints,
 			getTools: () => registry.list(),
 			skillController,
+			getAgentCatalog: () => agentCatalog,
+			// Headless runs exit after one prompt, so a backgrounded agent would be
+			// cancelled before reporting — and the model would have been told a
+			// report was coming. Withhold the supervisor so those spawns run inline.
+			...(headless ? {} : { backgroundSupervisor }),
 			// Lazy: mcpController is declared below (it needs `registry`), resolved at call time.
 			getMcpRegistrar: () => mcpController,
 		}),
@@ -474,6 +485,7 @@ async function main(): Promise<void> {
 		hookController,
 		lsp,
 		checkpoints,
+		backgroundSupervisor,
 		getDurableSession: () => sessionLifecycle.current(),
 		onThreadReplaced: (threadId) => sessionLifecycle.replaceThread(threadId),
 		syncDynamicTools: syncMcpToolUpdates,
@@ -482,10 +494,25 @@ async function main(): Promise<void> {
 		getTranscriptPath: () =>
 			sessionPathsForRoot(sessionLifecycle.current().sessionRoot).clientLog,
 	});
+	// Deferred: the supervisor is built before the controller that consumes its
+	// reports. Reports queue at "later" so they never preempt user input.
+	backgroundSupervisor.setNotifier((report) => {
+		void controller
+			.submit(report, { emitUserMessage: false, priority: "later" })
+			.catch(() => {});
+	});
+
 	const attachmentManager = new AttachmentManager();
 	sweepStaleClipboardImages();
 	const flush = async (): Promise<void> => {
 		try {
+			// A run that finished between the UI exiting and this call is already
+			// out of the supervisor's map, so cancelAll cannot reach the report
+			// turn it started: close the notifier and cancel the controller too,
+			// then let dispose() wait for whatever turn is still unwinding.
+			backgroundSupervisor.disableNotifier();
+			backgroundSupervisor.cancelAll();
+			controller.cancel({ clearQueue: true });
 			detachResumeIndex();
 			await controller.dispose();
 			await lsp.shutdown();

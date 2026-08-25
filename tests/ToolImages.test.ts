@@ -2,13 +2,17 @@ import { describe, expect, it } from "bun:test";
 import { ImageContent } from "../src/core/image/ImageContent.ts";
 import { toAnthropicMessages } from "../src/providers/byok/adapters/AnthropicAdapter.ts";
 import { renderGoogleContents } from "../src/providers/byok/adapters/GoogleAdapter.ts";
-import { toOpenAIMessages } from "../src/providers/byok/adapters/OpenAIAdapter.ts";
+import {
+	openAIModelAcceptsImages,
+	toOpenAIMessages,
+} from "../src/providers/byok/adapters/OpenAIAdapter.ts";
 import { toOpenRouterMessages } from "../src/providers/byok/adapters/OpenRouterAdapter.ts";
 import type {
 	ByokMessage,
 	ByokStreamRequest,
 } from "../src/providers/byok/ByokTypes.ts";
 import {
+	GOOGLE_TOOL_IMAGE_MEDIA_TYPES,
 	planToolImages,
 	renderToolResult,
 	splitToolOutputImages,
@@ -83,6 +87,43 @@ describe("splitToolOutputImages", () => {
 		});
 	});
 
+	it("omits image formats provider APIs do not accept", () => {
+		const output = JSON.stringify({
+			image: ImageContent.fromBase64("AA==", "image/tiff"),
+		});
+		const split = splitToolOutputImages(output);
+		expect(split.images).toEqual([]);
+		expect(split.text).toContain(
+			"omitted: unsupported image format image/tiff",
+		);
+		expect(split.text).not.toContain("AA==");
+
+		const messages = transcript(2);
+		const latest = messages[4];
+		if (latest?.role !== "tool") throw new Error("expected tool message");
+		const latestResult = latest.results[0];
+		if (!latestResult) throw new Error("expected tool result");
+		latestResult.output = output;
+		expect([...planToolImages(messages, 1)]).toEqual(["2:0"]);
+	});
+
+	it("uses Gemini's image MIME capabilities", () => {
+		const gif = JSON.stringify({
+			image: ImageContent.fromBase64("R0lG", "image/gif"),
+		});
+		const heic = JSON.stringify({
+			image: ImageContent.fromBase64("aGVpYw==", "image/heic"),
+		});
+		expect(splitToolOutputImages(gif).images).toHaveLength(1);
+		expect(
+			splitToolOutputImages(gif, GOOGLE_TOOL_IMAGE_MEDIA_TYPES).images,
+		).toHaveLength(0);
+		expect(splitToolOutputImages(heic).images).toHaveLength(0);
+		expect(
+			splitToolOutputImages(heic, GOOGLE_TOOL_IMAGE_MEDIA_TYPES).images,
+		).toEqual([{ mediaType: "image/heic", base64: "aGVpYw==" }]);
+	});
+
 	it("keeps only the most recent screenshots as images", () => {
 		const messages = transcript(5);
 		const plan = planToolImages(messages, 3);
@@ -117,6 +158,55 @@ describe("BYOK adapters attach tool images natively", () => {
 			});
 			expect(JSON.stringify(out).split(PNG).length - 1).toBe(1);
 		}
+	});
+
+	it("omits screenshots for text-only OpenRouter models", () => {
+		const out = toOpenRouterMessages(request(transcript(1)), false) as Array<
+			Record<string, unknown>
+		>;
+		expect(JSON.stringify(out)).not.toContain(PNG);
+		expect(JSON.stringify(out)).toContain("model does not accept images");
+		expect(out.some((message) => message.role === "user")).toBe(true);
+	});
+
+	it("omits user image attachments for text-only OpenRouter models", () => {
+		const messages: ByokMessage[] = [
+			{
+				role: "user",
+				content: "inspect this",
+				attachments: [
+					{
+						path: "image.png",
+						mediaType: "image/png",
+						base64: PNG,
+					},
+				],
+			},
+		];
+		const out = toOpenRouterMessages(request(messages), false);
+		expect(JSON.stringify(out)).not.toContain(PNG);
+		expect(JSON.stringify(out)).toContain("does not accept images");
+	});
+
+	it("omits images for text-only OpenAI models", () => {
+		for (const model of [
+			"gpt-3.5-turbo",
+			"gpt-4",
+			"gpt-4-0613",
+			"gpt-4-32k-0613",
+			"gpt-4-0125-preview",
+			"ft:gpt-4-0613:org:custom-name",
+			"o1-mini",
+			"o3-mini-2025-01-31",
+		]) {
+			expect(openAIModelAcceptsImages(model)).toBe(false);
+		}
+		const out = toOpenAIMessages({
+			...request(transcript(1)),
+			model: "gpt-3.5-turbo",
+		});
+		expect(JSON.stringify(out)).not.toContain(PNG);
+		expect(JSON.stringify(out)).toContain("model does not accept images");
 	});
 
 	it("Anthropic puts image blocks inside tool_result", () => {

@@ -17,6 +17,7 @@ interface Pending {
 	reject: (error: Error) => void;
 	timer: ReturnType<typeof setTimeout>;
 	cleanup: () => void;
+	onSettle?: () => void;
 }
 
 /**
@@ -30,6 +31,7 @@ export class HelperProcess {
 	private buffer = "";
 	private nextId = 1;
 	private readonly pending = new Map<number, Pending>();
+	private drain: Promise<void> = Promise.resolve();
 	private stderr = "";
 	private disposed = false;
 
@@ -43,6 +45,7 @@ export class HelperProcess {
 		body: Record<string, unknown>,
 		options: { signal?: AbortSignal; timeoutMs?: number } = {},
 	): Promise<T> {
+		await this.waitForDrain();
 		if (this.disposed) {
 			throw new Error(`${this.label} has been disposed`);
 		}
@@ -53,13 +56,11 @@ export class HelperProcess {
 			options.timeoutMs ?? this.options.requestTimeoutMs ?? 20_000;
 		return new Promise<T>((resolve, reject) => {
 			const onAbort = () => {
-				this.settle(id);
-				reject(new Error("aborted"));
+				this.abortRequest(id, new Error("aborted"));
 			};
-			options.signal?.addEventListener("abort", onAbort, { once: true });
 			const timer = setTimeout(() => {
-				this.settle(id);
-				reject(
+				this.cancelRequest(
+					id,
 					new Error(
 						`${this.label} did not answer "${String(body.op ?? "request")}" within ${timeoutMs}ms`,
 					),
@@ -71,6 +72,12 @@ export class HelperProcess {
 				timer,
 				cleanup: () => options.signal?.removeEventListener("abort", onAbort),
 			});
+			options.signal?.addEventListener("abort", onAbort, { once: true });
+			if (options.signal?.aborted) {
+				this.settle(id);
+				reject(new Error("aborted"));
+				return;
+			}
 			const line = `${JSON.stringify({ id, ...body })}\n`;
 			child.stdin?.write(line, (err) => {
 				if (err) {
@@ -83,6 +90,7 @@ export class HelperProcess {
 
 	async dispose(): Promise<void> {
 		this.disposed = true;
+		await this.waitForDrain();
 		this.failAll(new Error(`${this.label} was disposed`));
 		const child = this.child;
 		this.child = null;
@@ -95,6 +103,14 @@ export class HelperProcess {
 		return this.options.label ?? this.options.command;
 	}
 
+	private async waitForDrain(): Promise<void> {
+		while (true) {
+			const drain = this.drain;
+			await drain;
+			if (drain === this.drain) return;
+		}
+	}
+
 	private ensureChild(): ChildProcess {
 		if (this.child && this.child.exitCode === null) return this.child;
 		const child = spawn(this.options.command, this.options.args ?? [], {
@@ -104,18 +120,23 @@ export class HelperProcess {
 		this.buffer = "";
 		this.stderr = "";
 		child.stdout?.setEncoding("utf8");
-		child.stdout?.on("data", (chunk: string) => this.onData(chunk));
+		child.stdout?.on("data", (chunk: string) => {
+			if (this.child === child) this.onData(chunk);
+		});
 		child.stderr?.setEncoding("utf8");
 		child.stderr?.on("data", (chunk: string) => {
+			if (this.child !== child) return;
 			const limit = this.options.stderrLimit ?? 4000;
 			this.stderr = (this.stderr + chunk).slice(-limit);
 		});
 		child.on("error", (err) => {
+			if (this.child !== child) return;
+			this.child = null;
 			this.failAll(new Error(`${this.label} failed to start: ${err.message}`));
-			if (this.child === child) this.child = null;
 		});
 		child.on("close", (code) => {
-			if (this.child === child) this.child = null;
+			if (this.child !== child) return;
+			this.child = null;
 			const detail = this.stderr.trim();
 			this.failAll(
 				new Error(
@@ -171,6 +192,43 @@ export class HelperProcess {
 		clearTimeout(entry.timer);
 		entry.cleanup();
 		this.pending.delete(id);
+		entry.onSettle?.();
+	}
+
+	private cancelRequest(id: number, error: Error): void {
+		const entry = this.pending.get(id);
+		if (!entry) return;
+		this.settle(id);
+		entry.reject(error);
+		const child = this.child;
+		if (!child) return;
+		this.child = null;
+		this.failAll(
+			new Error(`${this.label} restarted after a cancelled request`),
+		);
+		if (child.exitCode === null) child.kill();
+	}
+
+	private abortRequest(id: number, error: Error): void {
+		const entry = this.pending.get(id);
+		if (!entry) return;
+		let releaseDrain: () => void = () => {};
+		const draining = new Promise<void>((resolve) => {
+			releaseDrain = resolve;
+		});
+		this.drain = this.drain.then(() => draining);
+		entry.cleanup();
+		entry.reject(error);
+		// Let the in-flight native action finish so any key-down or mouse-down
+		// event reaches its matching release. Keep the timeout armed so a truly
+		// hung helper is still restarted.
+		this.pending.set(id, {
+			...entry,
+			resolve: () => {},
+			reject: () => {},
+			cleanup: () => {},
+			onSettle: releaseDrain,
+		});
 	}
 
 	private failAll(error: Error): void {

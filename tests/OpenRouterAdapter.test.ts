@@ -10,11 +10,14 @@ import {
 	supportsOpenRouterThinking,
 } from "../src/providers/byok/adapters/OpenRouterAdapter.ts";
 import { ByokClient } from "../src/providers/byok/ByokClient.ts";
+import type { ByokStreamRequest } from "../src/providers/byok/ByokTypes.ts";
 
 const originalFetch = globalThis.fetch;
+const originalDateNow = Date.now;
 
 afterEach(() => {
 	globalThis.fetch = originalFetch;
+	Date.now = originalDateNow;
 });
 
 const TOOLS: OpenAITool[] = [
@@ -391,6 +394,172 @@ describe("OpenRouter catalog", () => {
 });
 
 describe("OpenRouter streaming", () => {
+	it("loads cold image capability before messaging a text-only model", async () => {
+		const captured: CapturedRequest[] = [];
+		const image = "aW1hZ2U=";
+		globalThis.fetch = (async (url: string, init?: RequestInit) => {
+			if (String(url).endsWith("/models/user")) {
+				return Response.json({
+					data: [
+						{
+							id: "openai/text-only-cold",
+							supported_parameters: ["tools"],
+							architecture: {
+								input_modalities: ["text"],
+								output_modalities: ["text"],
+							},
+						},
+					],
+				});
+			}
+			const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+			captured.push({
+				url: String(url),
+				headers: (init?.headers ?? {}) as Record<string, string>,
+				body,
+			});
+			return new Response(
+				`data: ${JSON.stringify({
+					choices: [{ delta: { content: "Done." }, finish_reason: "stop" }],
+				})}\n\ndata: [DONE]\n\n`,
+				{ headers: { "Content-Type": "text/event-stream" } },
+			);
+		}) as unknown as typeof fetch;
+		const streamRequest: ByokStreamRequest = {
+			model: "openai/text-only-cold",
+			systemPrompt: "sys",
+			tools: [],
+			messages: [
+				{
+					role: "user",
+					content: "inspect",
+					attachments: [
+						{
+							path: "image.png",
+							mediaType: "image/png",
+							base64: image,
+						},
+					],
+				},
+			],
+		};
+		await collect(
+			openRouterAdapter.stream(
+				streamRequest,
+				"sk-or-v1-cold-image-capability-key",
+			),
+		);
+		expect(JSON.stringify(captured[0]?.body)).not.toContain(image);
+		expect(JSON.stringify(captured[0]?.body)).toContain(
+			"does not accept images",
+		);
+	});
+
+	it("does not silently omit images when the capability catalog fails", async () => {
+		let chatRequests = 0;
+		globalThis.fetch = (async (url: string) => {
+			if (String(url).endsWith("/models/user")) {
+				return new Response("catalog unavailable", { status: 503 });
+			}
+			chatRequests++;
+			throw new Error("chat request should not be sent");
+		}) as unknown as typeof fetch;
+		const streamRequest: ByokStreamRequest = {
+			model: "openai/vision-model",
+			systemPrompt: "sys",
+			tools: [],
+			messages: [
+				{
+					role: "user",
+					content: "inspect",
+					attachments: [
+						{
+							path: "image.png",
+							mediaType: "image/png",
+							base64: "aW1hZ2U=",
+						},
+					],
+				},
+			],
+		};
+		await expect(
+			collect(
+				openRouterAdapter.stream(
+					streamRequest,
+					"sk-or-v1-catalog-failure-image-key",
+				),
+			),
+		).rejects.toThrow("503");
+		expect(chatRequests).toBe(0);
+	});
+
+	it("uses stale image capability when a catalog refresh fails", async () => {
+		let now = 1_000_000;
+		Date.now = () => now;
+		let catalogRequests = 0;
+		const captured: CapturedRequest[] = [];
+		globalThis.fetch = (async (url: string, init?: RequestInit) => {
+			if (String(url).endsWith("/models/user")) {
+				catalogRequests++;
+				if (catalogRequests > 1) {
+					return new Response("catalog unavailable", { status: 503 });
+				}
+				return Response.json({
+					data: [
+						{
+							id: "openai/stale-vision",
+							supported_parameters: ["tools"],
+							architecture: {
+								input_modalities: ["text", "image"],
+								output_modalities: ["text"],
+							},
+						},
+					],
+				});
+			}
+			const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+			captured.push({
+				url: String(url),
+				headers: (init?.headers ?? {}) as Record<string, string>,
+				body,
+			});
+			return new Response(
+				`data: ${JSON.stringify({
+					choices: [{ delta: { content: "Done." }, finish_reason: "stop" }],
+				})}\n\ndata: [DONE]\n\n`,
+				{ headers: { "Content-Type": "text/event-stream" } },
+			);
+		}) as unknown as typeof fetch;
+		const key = "sk-or-v1-stale-image-capability-key";
+		await openRouterAdapter.listModels(key);
+		now += 5 * 60 * 1000 + 1;
+		await collect(
+			openRouterAdapter.stream(
+				{
+					model: "openai/stale-vision",
+					systemPrompt: "sys",
+					tools: [],
+					messages: [
+						{
+							role: "user",
+							content: "inspect",
+							attachments: [
+								{
+									path: "image.png",
+									mediaType: "image/png",
+									base64: "aW1hZ2U=",
+								},
+							],
+						},
+					],
+				},
+				key,
+			),
+		);
+		expect(catalogRequests).toBe(2);
+		expect(JSON.stringify(captured[0]?.body)).toContain("aW1hZ2U=");
+	});
+
 	it("sends tools, attribution, routing requirements, and reasoning", async () => {
 		const captured = stubStreams([toolTurn()]);
 
@@ -637,6 +806,25 @@ describe("OpenRouter streaming", () => {
 		expect(events.at(-1)).toEqual({
 			kind: "failed",
 			error: "Provider rate limited",
+		});
+	});
+
+	it("marks streamed OpenRouter gateway errors retryable", async () => {
+		stubStreams([
+			[
+				JSON.stringify({
+					error: { code: 503, message: "Provider unavailable" },
+				}),
+				"[DONE]",
+			],
+		]);
+
+		const events = await collect(client().runMessage(request()));
+
+		expect(events.at(-1)).toEqual({
+			kind: "failed",
+			error: "Provider unavailable",
+			retryable: true,
 		});
 	});
 

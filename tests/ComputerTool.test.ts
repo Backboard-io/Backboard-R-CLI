@@ -340,6 +340,14 @@ describe("ComputerTool permissions", () => {
 		);
 	});
 
+	it("does not throw while summarizing an invalid key chord", () => {
+		expect(
+			tool.summarizeInput({
+				actions: [{ action: "key", key: "ctrl+bogus+a" }],
+			}),
+		).toContain("ctrl+bogus+a");
+	});
+
 	it("flags credential-looking text", () => {
 		expect(
 			tool.permissionHint({
@@ -403,8 +411,9 @@ describe("ComputerRuntime batches", () => {
 			(wire.observation as Record<string, unknown>).__image_base64,
 		).toBeUndefined();
 		expect(platform.screenshots).toHaveLength(1);
-		expect(platform.settles).toHaveLength(1);
+		expect(platform.settles).toHaveLength(2);
 		expect(platform.settles[0]?.timeoutMs).toBe(3000);
+		expect(platform.settles[1]?.timeoutMs).toBe(10);
 		expect(data.timing.totalMs).toBeGreaterThanOrEqual(0);
 		expect(data.timing.settled).toBe(true);
 		expect(result.title).toContain("Ran 3 actions");
@@ -435,9 +444,74 @@ describe("ComputerRuntime batches", () => {
 		);
 		const data = result.data as ComputerQueueResult;
 		expect(platform.screenshots).toHaveLength(1);
-		expect(platform.settles).toHaveLength(0);
+		expect(platform.settles).toHaveLength(1);
 		expect(data.observation).toBeDefined();
 		expect(result.forLLM.split("__image_base64").length - 1).toBe(1);
+	});
+
+	it("does not reuse observation state across sessions", async () => {
+		const platform = new FakePlatform();
+		const tool = makeTool(platform);
+		await tool.execute({ actions: [{ action: "screenshot" }] }, ctx());
+		const otherContext = ctx();
+		otherContext.sessionId = "other-session";
+		const result = await tool.execute(
+			{ actions: [{ action: "click", target: { x: 10, y: 10 } }] },
+			otherContext,
+		);
+		expect((result.data as ComputerQueueResult).results[0]?.error).toContain(
+			"screenshot is required",
+		);
+		expect(platform.actions).toHaveLength(0);
+	});
+
+	it("bounds retained observation state across sessions", async () => {
+		const platform = new FakePlatform();
+		const tool = makeTool(platform);
+		for (let index = 0; index < 5; index++) {
+			const context = ctx();
+			context.sessionId = `session-${index}`;
+			await tool.execute({ actions: [{ action: "screenshot" }] }, context);
+		}
+		const oldest = ctx();
+		oldest.sessionId = "session-0";
+		const result = await tool.execute(
+			{ actions: [{ action: "click", target: { x: 10, y: 10 } }] },
+			oldest,
+		);
+		expect((result.data as ComputerQueueResult).results[0]?.error).toContain(
+			"screenshot is required",
+		);
+	});
+
+	it("settles a launched app before sending the next input", async () => {
+		const platform = new FakePlatform();
+		const events: string[] = [];
+		const execute = platform.execute.bind(platform);
+		platform.execute = async (action) => {
+			events.push(`execute:${action.kind}`);
+			await execute(action);
+		};
+		const settle = platform.settle.bind(platform);
+		platform.settle = async (options) => {
+			events.push("settle");
+			return settle(options);
+		};
+		await makeTool(platform).execute(
+			{
+				actions: [
+					{ action: "openApp", appName: "Notes" },
+					{ action: "type", text: "hello" },
+				],
+			},
+			ctx(),
+		);
+		expect(events).toEqual([
+			"execute:openApp",
+			"settle",
+			"execute:type",
+			"settle",
+		]);
 	});
 
 	it("stops at the first failure, marks the rest skipped, and still observes", async () => {
@@ -489,6 +563,7 @@ describe("ComputerRuntime batches", () => {
 		expect(data.results[1]?.success).toBe(true);
 		expect(data.stoppedAt).toBeUndefined();
 		expect(platform.actions).toHaveLength(1);
+		expect(data.observation).toBeDefined();
 	});
 
 	it("resolves element targets to centre points in point space", async () => {
@@ -522,6 +597,31 @@ describe("ComputerRuntime batches", () => {
 			count: 2,
 			modifiers: ["shift"],
 		});
+	});
+
+	it("rejects element centers outside the observed display", async () => {
+		const platform = new FakePlatform();
+		platform.elements = [
+			{
+				id: "el_1",
+				role: "Button",
+				bounds: { x: 1430, y: 10, width: 40, height: 20 },
+			},
+		];
+		const tool = makeTool(platform);
+		const result = await tool.execute(
+			{
+				actions: [
+					{ action: "screenshot" },
+					{ action: "click", target: { elementId: "el_1" } },
+				],
+			},
+			ctx(),
+		);
+		expect((result.data as ComputerQueueResult).results[1]?.error).toContain(
+			"centered outside",
+		);
+		expect(platform.actions).toHaveLength(0);
 	});
 
 	it("refreshes element bounds after a state change inside the batch", async () => {
@@ -571,6 +671,120 @@ describe("ComputerRuntime batches", () => {
 		expect(clicks[1]).toMatchObject({ point: { x: 230, y: 310 } });
 	});
 
+	it("refreshes element bounds after a hover move inside the batch", async () => {
+		const platform = new FakePlatform();
+		platform.elements = [
+			{
+				id: "el_1",
+				role: "Button",
+				name: "Menu",
+				bounds: { x: 0, y: 0, width: 100, height: 20 },
+			},
+			{
+				id: "el_2",
+				role: "MenuItem",
+				name: "Settings",
+				bounds: { x: 0, y: 40, width: 60, height: 20 },
+			},
+		];
+		platform.refreshedElements = [
+			platform.elements[0] as AccessibilityElement,
+			{
+				id: "el_8",
+				role: "MenuItem",
+				name: "Settings",
+				bounds: { x: 200, y: 300, width: 60, height: 20 },
+			},
+		];
+		await makeTool(platform).execute(
+			{
+				actions: [
+					{ action: "screenshot" },
+					{ action: "move", target: { elementId: "el_1" } },
+					{ action: "click", target: { elementId: "el_2" } },
+				],
+			},
+			ctx(),
+		);
+		expect(platform.actions).toEqual([
+			{ kind: "move", point: { x: 50, y: 10 } },
+			{
+				kind: "click",
+				point: { x: 230, y: 310 },
+				button: "left",
+				count: 1,
+				modifiers: [],
+			},
+		]);
+	});
+
+	it("refreshes element bounds after waiting inside the batch", async () => {
+		const platform = new FakePlatform();
+		platform.elements = [
+			{
+				id: "el_1",
+				role: "Button",
+				name: "Continue",
+				bounds: { x: 0, y: 0, width: 20, height: 20 },
+			},
+		];
+		platform.refreshedElements = [
+			{
+				id: "fresh",
+				role: "Button",
+				name: "Continue",
+				bounds: { x: 200, y: 300, width: 20, height: 20 },
+			},
+		];
+		await makeTool(platform).execute(
+			{
+				actions: [
+					{ action: "screenshot" },
+					{ action: "wait", durationMs: 1 },
+					{ action: "click", target: { elementId: "el_1" } },
+				],
+			},
+			ctx(),
+		);
+		expect(platform.actions).toEqual([
+			{
+				kind: "click",
+				point: { x: 210, y: 310 },
+				button: "left",
+				count: 1,
+				modifiers: [],
+			},
+		]);
+	});
+
+	it("disambiguates duplicate element names by their prior position", () => {
+		const previous: AccessibilityElement[] = [
+			{
+				id: "old",
+				role: "Button",
+				name: "Delete",
+				bounds: { x: 200, y: 200, width: 50, height: 20 },
+			},
+		];
+		const fresh: AccessibilityElement[] = [
+			{
+				id: "first",
+				role: "Button",
+				name: "Delete",
+				bounds: { x: 10, y: 10, width: 50, height: 20 },
+			},
+			{
+				id: "second",
+				role: "Button",
+				name: "Delete",
+				bounds: { x: 205, y: 200, width: 50, height: 20 },
+			},
+		];
+		expect(refreshElementBounds(previous, fresh)[0]?.bounds).toEqual(
+			fresh[1]?.bounds,
+		);
+	});
+
 	it("rejects coordinates before a screenshot and outside the screen", async () => {
 		const platform = new FakePlatform();
 		const tool = makeTool(platform);
@@ -591,6 +805,18 @@ describe("ComputerRuntime batches", () => {
 			ctx(),
 		);
 		expect((second.data as ComputerQueueResult).results[1]?.error).toContain(
+			"outside the 1440x900 screen",
+		);
+		const edge = await tool.execute(
+			{
+				actions: [
+					{ action: "screenshot" },
+					{ action: "click", target: { x: 1440, y: 899 } },
+				],
+			},
+			ctx(),
+		);
+		expect((edge.data as ComputerQueueResult).results[1]?.error).toContain(
 			"outside the 1440x900 screen",
 		);
 		expect(platform.actions).toHaveLength(0);
@@ -672,6 +898,58 @@ describe("ComputerRuntime batches", () => {
 		expect(platform.settles).toHaveLength(0);
 	});
 
+	it("refreshes dirty elements and screen dimensions before zooming", async () => {
+		const platform = new FakePlatform();
+		platform.elements = [
+			{
+				id: "el_1",
+				role: "Button",
+				name: "Open",
+				bounds: { x: 0, y: 0, width: 10, height: 10 },
+			},
+		];
+		platform.refreshedElements = [
+			{
+				id: "fresh",
+				role: "Button",
+				name: "Open",
+				bounds: { x: 40, y: 50, width: 20, height: 20 },
+			},
+		];
+		const execute = platform.execute.bind(platform);
+		platform.execute = async (action) => {
+			await execute(action);
+			platform.screen = { width: 1920, height: 1080 };
+		};
+		const tool = makeTool(platform);
+		const result = await tool.execute(
+			{
+				actions: [
+					{ action: "screenshot" },
+					{ action: "click", target: { elementId: "el_1" } },
+					{ action: "zoom", region: { x: 10, y: 10, width: 200, height: 100 } },
+				],
+			},
+			ctx(),
+		);
+		const observation = (result.data as ComputerQueueResult).observation;
+		expect(observation?.screenSize).toEqual({ width: 1920, height: 1080 });
+		expect(observation?.elements[0]?.bounds).toEqual({
+			x: 40,
+			y: 50,
+			width: 20,
+			height: 20,
+		});
+		expect(platform.settles).toHaveLength(1);
+		const followUp = await tool.execute(
+			{ actions: [{ action: "click", target: { x: 1800, y: 100 } }] },
+			ctx(),
+		);
+		expect((followUp.data as ComputerQueueResult).results[0]?.success).toBe(
+			true,
+		);
+	});
+
 	it("runs wait without touching the platform and honours abort", async () => {
 		const platform = new FakePlatform();
 		const tool = makeTool(platform);
@@ -683,6 +961,7 @@ describe("ComputerRuntime batches", () => {
 			"Waited 1ms.",
 		);
 		expect(platform.actions).toEqual([]);
+		expect((result.data as ComputerQueueResult).observation).toBeDefined();
 
 		const controller = new AbortController();
 		const pending = tool.execute(
@@ -691,6 +970,18 @@ describe("ComputerRuntime batches", () => {
 		);
 		controller.abort();
 		await expect(pending).rejects.toThrow("aborted");
+	});
+
+	it("accepts advertised long hold durations", () => {
+		const parsed = new ComputerTool().inputSchema.parse({
+			actions: [{ action: "holdKey", key: "SHIFT", durationMs: 45_000 }],
+		});
+		expect(parsed.actions[0]).toMatchObject({ durationMs: 45_000 });
+		expect(() =>
+			new ComputerTool().inputSchema.parse({
+				actions: [{ action: "holdKey", key: "SHIFT", durationMs: 0 }],
+			}),
+		).toThrow();
 	});
 
 	it("disposes the platform with the tool", async () => {
@@ -715,6 +1006,10 @@ describe("computer keys", () => {
 		expect(normalizeComputerKey("ctrl++")).toEqual({
 			key: "+",
 			modifiers: ["control"],
+		});
+		expect(normalizeComputerKey("PLUS")).toEqual({
+			key: "+",
+			modifiers: [],
 		});
 		expect(normalizeComputerKey("super+Page_Down")).toEqual({
 			key: "PAGEDOWN",
@@ -784,7 +1079,7 @@ describe("element refresh", () => {
 			width: 12,
 			height: 12,
 		});
-		expect(refreshed[2]?.bounds).toEqual({ x: 90, y: 90, width: 5, height: 5 });
+		expect(refreshed[2]?.bounds).toBeUndefined();
 		expect(refreshed.map((e) => e.id)).toEqual(["el_1", "el_2", "el_3"]);
 	});
 });

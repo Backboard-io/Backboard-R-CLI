@@ -119,8 +119,8 @@ export class ObservationTargetResolver implements TargetResolver {
 				!Number.isFinite(target.y) ||
 				target.x < 0 ||
 				target.y < 0 ||
-				target.x > width ||
-				target.y > height
+				target.x >= width ||
+				target.y >= height
 			) {
 				throw new Error(
 					`Coordinates (${target.x}, ${target.y}) are outside the ${width}x${height} screen. Use the screenSize space of the latest screenshot.`,
@@ -139,10 +139,17 @@ export class ObservationTargetResolver implements TargetResolver {
 		if (!element.bounds) {
 			throw new Error(`Element ${target.elementId} has no screen bounds.`);
 		}
-		return {
+		const point = {
 			x: element.bounds.x + element.bounds.width / 2,
 			y: element.bounds.y + element.bounds.height / 2,
 		};
+		const { width, height } = observation.screenSize;
+		if (point.x < 0 || point.y < 0 || point.x >= width || point.y >= height) {
+			throw new Error(
+				`Element ${target.elementId} is centered outside the ${width}x${height} screen.`,
+			);
+		}
+		return point;
 	}
 }
 
@@ -158,7 +165,8 @@ export function refreshElementBounds(
 ): AccessibilityElement[] {
 	const used = new Set<string>();
 	return previous.map((element) => {
-		const byName = fresh.find(
+		const previousBounds = element.bounds;
+		const named = fresh.filter(
 			(candidate) =>
 				!used.has(candidate.id) &&
 				candidate.role === element.role &&
@@ -166,17 +174,29 @@ export function refreshElementBounds(
 				candidate.name === element.name &&
 				candidate.bounds,
 		);
+		const byName =
+			named.length === 1
+				? named[0]
+				: previousBounds
+					? named.find(
+							(candidate) =>
+								candidate.bounds && overlaps(candidate.bounds, previousBounds),
+						)
+					: undefined;
 		const match =
 			byName ??
 			fresh.find(
 				(candidate) =>
 					!used.has(candidate.id) &&
 					candidate.role === element.role &&
+					(element.name === undefined ||
+						candidate.name === undefined ||
+						candidate.name === element.name) &&
 					candidate.bounds &&
 					element.bounds &&
 					overlaps(candidate.bounds, element.bounds),
 			);
-		if (!match?.bounds) return element;
+		if (!match?.bounds) return { ...element, bounds: undefined };
 		used.add(match.id);
 		return { ...element, bounds: match.bounds };
 	});

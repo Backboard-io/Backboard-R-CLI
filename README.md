@@ -523,7 +523,7 @@ bun run cua:eval       # Tier 1: real agent loop on programmatic tasks in Dayton
 `cua:grounding` needs `BACKBOARD_API_KEY`; `cua:eval` also needs
 `DAYTONA_API_KEY` (both are read from `.env` or `../cli-eval/.env`). Record new
 grounding fixtures from an app on your screen with
-`scripts/cua-eval/capture-fixture.ts --open <App> --window --target <name>`.
+`bun run scripts/cua-eval/capture-fixture.ts --open <App> --window --target <name>`.
 See `docs/cua-research.md` for the design, measurements, and the eval plan.
 
 ### Release builds

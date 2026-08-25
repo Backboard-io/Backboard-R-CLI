@@ -15,23 +15,47 @@ import { Config } from "../src/config/Config.ts";
 import { ToolRegistry } from "../src/core/tools/ToolRegistry.ts";
 import { BackboardClient } from "../src/providers/backboard/BackboardClient.ts";
 import type { ModelCatalogItem } from "../src/providers/backboard/types.ts";
+import { byokAdapter } from "../src/providers/byok/registry.ts";
 import { createAgentClient } from "../src/providers/createAgentClient.ts";
 import { createDefaultTools } from "../src/tools/index.ts";
 
 const filterIndex = process.argv.indexOf("-f");
 const filter = filterIndex >= 0 ? process.argv[filterIndex + 1] : undefined;
+if (filterIndex >= 0 && (!filter || filter.startsWith("-"))) {
+	throw new Error("-f requires a provider/model filter");
+}
 
 const config = new Config({ argv: [] });
 config.enableComputerUse();
 config.enableBrowserUse();
-const tools = new ToolRegistry(createDefaultTools()).toJSONSchemas(
+const router = createAgentClient(config);
+await Promise.all(
+	config.auth.providerKeys.map(async ({ provider, key }) => {
+		try {
+			await byokAdapter(provider).listModels(key);
+		} catch (err) {
+			throw new Error(
+				`${provider} catalog failed: ${
+					err instanceof Error ? err.message : String(err)
+				}`,
+			);
+		}
+	}),
+);
+let toolList: ReturnType<typeof createDefaultTools> = [];
+toolList = createDefaultTools({
+	client: router,
+	config,
+	getTools: () => toolList,
+});
+const tools = new ToolRegistry(toolList).toJSONSchemas(
 	config.enabledTools,
 	config.toolSchemaExcludedNames,
 );
-const router = createAgentClient(config);
 const backboard = config.hasBackboardAuth
 	? new BackboardClient(config.env)
 	: null;
+if (backboard) await backboard.listModels();
 const catalog = (await router.listModels()).models;
 
 /** Models that are not chat endpoints or are only reachable through batch APIs. */
@@ -154,4 +178,8 @@ if (backboard) {
 }
 
 process.stdout.write(`\n${pass}/${total} passed\n`);
+if (filter && total === 0) {
+	process.stderr.write(`No provider/model matched filter: ${filter}\n`);
+	process.exit(1);
+}
 process.exit(pass === total ? 0 : 1);

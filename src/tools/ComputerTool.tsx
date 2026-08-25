@@ -6,6 +6,7 @@ import {
 import { ComputerRuntime } from "../core/computer/ComputerRuntime.ts";
 import {
 	type ComputerAction,
+	type ComputerKey,
 	type ComputerQueueResult,
 	READ_ONLY_COMPUTER_ACTIONS,
 } from "../core/computer/ComputerTypes.ts";
@@ -84,7 +85,7 @@ const actionSchema = z.discriminatedUnion("action", [
 	z.object({
 		action: z.literal("holdKey"),
 		key: keySchema,
-		durationMs: z.number().int().min(1).max(30_000),
+		durationMs: z.number().int().min(1).max(60_000),
 	}),
 	z.object({
 		action: z.literal("wait"),
@@ -170,7 +171,7 @@ const publicActionSchema = z.object({
 	durationMs: z
 		.number()
 		.int()
-		.min(0)
+		.min(1)
 		.max(60_000)
 		.describe("wait/holdKey duration.")
 		.optional(),
@@ -354,13 +355,21 @@ export function summarizeAction(action: ComputerAction): string {
 		case "type":
 			return `type ${JSON.stringify(clip(action.text, 30))}`;
 		case "key":
-			return `key ${formatComputerKey(normalizeComputerKey(action.key))}${action.repeat && action.repeat > 1 ? ` x${action.repeat}` : ""}`;
+			return `key ${summarizeKey(action.key)}${action.repeat && action.repeat > 1 ? ` x${action.repeat}` : ""}`;
 		case "holdKey":
-			return `hold ${formatComputerKey(normalizeComputerKey(action.key))} ${action.durationMs}ms`;
+			return `hold ${summarizeKey(action.key)} ${action.durationMs}ms`;
 		case "wait":
 			return `wait ${action.durationMs}ms`;
 		case "openApp":
 			return `open ${action.appName}`;
+	}
+}
+
+function summarizeKey(key: ComputerKey): string {
+	try {
+		return formatComputerKey(normalizeComputerKey(key));
+	} catch {
+		return typeof key === "string" ? key : String(key.key);
 	}
 }
 

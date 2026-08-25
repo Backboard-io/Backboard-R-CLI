@@ -27,10 +27,11 @@ import type { ComputerQueueResult } from "../../src/core/computer/ComputerTypes.
 import { emptyRuleSet } from "../../src/core/permissions/PermissionRules.ts";
 import type { Tool } from "../../src/core/tools/Tool.ts";
 import type { ToolContext } from "../../src/core/tools/ToolContext.ts";
-import type { ToolResult } from "../../src/core/tools/ToolResult.ts";
+import { ok, type ToolResult } from "../../src/core/tools/ToolResult.ts";
 import { computer as computerSystemPrompt } from "../../src/prompts/system/computer.tsx";
 import { createAgentClient } from "../../src/providers/createAgentClient.ts";
 import { ComputerTool } from "../../src/tools/ComputerTool.tsx";
+import { EXECUTE_MAX_OUTPUT } from "../../src/tools/ExecuteTool.constants.ts";
 import { ExecuteTool } from "../../src/tools/ExecuteTool.tsx";
 import { DaytonaPlatform } from "./DaytonaPlatform.ts";
 import { loadEvalEnv } from "./env.ts";
@@ -92,38 +93,60 @@ function parseArgs(argv: string[]): Args {
 	};
 	for (let i = 0; i < argv.length; i++) {
 		const arg = argv[i];
-		const next = () => argv[++i];
+		const next = (name: string): string => {
+			const value = argv[++i];
+			if (!value || value.startsWith("-")) {
+				throw new Error(`${name} requires a value`);
+			}
+			return value;
+		};
 		switch (arg) {
 			case "-f":
 			case "--filter":
-				args.filter = next();
+				args.filter = next(arg);
 				break;
 			case "-c":
 			case "--concurrency":
-				args.concurrency = Number(next());
+				args.concurrency = Number(next(arg));
 				break;
 			case "--dry":
 				args.dry = true;
 				break;
 			case "--snapshot":
-				args.snapshot = next();
+				args.snapshot = next(arg);
 				break;
 			case "--build-snapshot":
-				args.buildSnapshot = next();
+				args.buildSnapshot = next(arg);
 				break;
 			case "--out":
-				args.out = next() ?? args.out;
+				args.out = next(arg);
 				break;
 			case "--max-rounds":
-				args.maxRounds = Number(next());
+				args.maxRounds = Number(next(arg));
 				break;
 			case "--keep":
 				args.keep = true;
 				break;
 			case "--model":
-				args.model = next();
+				args.model = next(arg);
 				break;
+			default:
+				throw new Error(`Unknown option: ${arg}`);
 		}
+	}
+	if (
+		!Number.isFinite(args.concurrency) ||
+		!Number.isInteger(args.concurrency) ||
+		args.concurrency <= 0
+	) {
+		throw new Error("--concurrency must be a positive integer");
+	}
+	if (
+		!Number.isFinite(args.maxRounds) ||
+		!Number.isInteger(args.maxRounds) ||
+		args.maxRounds <= 0
+	) {
+		throw new Error("--max-rounds must be a positive integer");
 	}
 	return args;
 }
@@ -139,6 +162,55 @@ class MeteredComputerTool extends ComputerTool {
 		const result = await super.execute(input, ctx);
 		this.calls.push(result.data);
 		return result;
+	}
+}
+
+class DaytonaExecuteTool extends ExecuteTool {
+	constructor(private readonly platform: DaytonaPlatform) {
+		super();
+	}
+
+	override async execute(
+		input: Parameters<ExecuteTool["execute"]>[0],
+		ctx: ToolContext,
+	): Promise<Awaited<ReturnType<ExecuteTool["execute"]>>> {
+		if (input.fireAndForget) {
+			throw new Error("Background commands are not supported in CUA evals");
+		}
+		const cwd = resolve("/home/daytona", input.cwd ?? ".");
+		const result = await this.platform.exec(
+			input.command,
+			input.timeout ?? 90,
+			{},
+			cwd,
+			ctx.signal,
+		);
+		const stdout = (result.stdout ?? result.output).slice(
+			0,
+			EXECUTE_MAX_OUTPUT,
+		);
+		const stderr = (result.stderr ?? "").slice(0, EXECUTE_MAX_OUTPUT);
+		const data = {
+			exitCode: result.exitCode,
+			stdout,
+			stderr,
+			...(result.timedOut ? { timedOut: true } : {}),
+		};
+		const output = [
+			...(result.timedOut ? ["[timed out]"] : []),
+			`exit code: ${data.exitCode}`,
+			...(stdout ? [`stdout:\n${stdout}`] : []),
+			...(stderr ? [`stderr:\n${stderr}`] : []),
+		].join("\n");
+		return ok(
+			data,
+			output,
+			result.timedOut
+				? "Timed out"
+				: result.exitCode === 0
+					? "Success"
+					: `Failed with code ${result.exitCode}`,
+		);
 	}
 }
 
@@ -167,14 +239,15 @@ function browserLaunch(command: string): string {
 async function installPackages(
 	platform: DaytonaPlatform,
 	log: (s: string) => void,
+	packages: readonly string[] = REQUIRED_PACKAGES,
 ): Promise<string> {
 	const who = await platform.exec("id -u; command -v sudo || echo nosudo", 10);
 	const isRoot = who.output.trim().startsWith("0");
 	const sudo = isRoot || who.output.includes("nosudo") ? "" : "sudo -n ";
 	const missing: string[] = [];
 	let browser = "";
-	const needsBrowser = REQUIRED_PACKAGES.includes("browser");
-	for (const pkg of REQUIRED_PACKAGES) {
+	const needsBrowser = packages.includes("browser");
+	for (const pkg of packages) {
 		if (pkg === "browser") continue;
 		const probe = await platform.exec(
 			`command -v ${pkg} >/dev/null 2>&1 && echo yes || echo no`,
@@ -273,12 +346,17 @@ async function runTask(
 			log,
 			labels: { "backboard-cua-eval": task.id },
 		});
-		const browser = await installPackages(platform, log);
+		const browser = await installPackages(platform, log, [
+			...new Set([...(task.packages ?? []), "xfce4-terminal", "xdotool"]),
+		]);
 		for (const raw of task.setup ?? []) {
 			const command = raw.replaceAll("{{browser}}", browser || "chromium");
 			const result = await platform.exec(command, 120);
-			if (result.exitCode !== 0)
-				log(`setup exit ${result.exitCode}: ${result.output.slice(0, 200)}`);
+			if (result.exitCode !== 0) {
+				throw new Error(
+					`setup exit ${result.exitCode}: ${result.output.slice(0, 200)}`,
+				);
+			}
 		}
 		const computerTool = new MeteredComputerTool(
 			new ComputerRuntime({
@@ -310,6 +388,7 @@ async function runTask(
 			return metrics;
 		}
 		if (!config) throw new Error("config required");
+		const taskPlatform = platform;
 
 		const client = createAgentClient(config);
 		const runner = new SubAgentRunner({
@@ -320,7 +399,9 @@ async function runTask(
 			getThinking: () => resolveRuntimeThinking(config, client),
 			getThinkingResolver: () => createRuntimeThinkingResolver(config, client),
 			systemPrompt: `${computerSystemPrompt.prompt}\n\nYou are operating a Linux XFCE desktop. The Execute tool runs shell commands inside the same machine; use it whenever a command is faster than the GUI. When the task is complete, reply with a one-line summary and stop.`,
-			toolFactory: () => [computerTool, new ExecuteTool()] as Tool[],
+			toolFactory: () =>
+				[computerTool, new DaytonaExecuteTool(taskPlatform)] as Tool[],
+			maxToolRounds: task.maxRounds ?? args.maxRounds,
 		});
 		const controller = new AbortController();
 		const timer = setTimeout(() => controller.abort(), 8 * 60 * 1000);
@@ -371,9 +452,9 @@ async function runTask(
 			metrics.observeMs += call.timing.observeMs;
 		}
 		const check = await task.check(platform);
-		metrics.pass = check.pass;
+		metrics.pass = metrics.status === "completed" && check.pass;
 		metrics.detail = check.detail;
-		log(`${check.pass ? "PASS" : "FAIL"} — ${check.detail}`);
+		log(`${metrics.pass ? "PASS" : "FAIL"} — ${check.detail}`);
 	} catch (err) {
 		metrics.error = err instanceof Error ? err.message : String(err);
 		metrics.detail = metrics.error;
@@ -381,10 +462,19 @@ async function runTask(
 	} finally {
 		metrics.wallMs = Math.round(performance.now() - started);
 		if (platform && !args.keep) await platform.dispose();
-		else if (platform)
-			log(
-				`kept sandbox ${platform.sandbox.id} (${await platform.previewUrl()})`,
-			);
+		else if (platform) {
+			try {
+				log(
+					`kept sandbox ${platform.sandbox.id} (${await platform.previewUrl()})`,
+				);
+			} catch (err) {
+				log(
+					`kept sandbox ${platform.sandbox.id} (preview unavailable: ${
+						err instanceof Error ? err.message : String(err)
+					})`,
+				);
+			}
+		}
 	}
 	return metrics;
 }
@@ -416,6 +506,13 @@ async function main(): Promise<void> {
 		(task) =>
 			filters.length === 0 || filters.some((f) => task.id.startsWith(f)),
 	);
+	if (tasks.length === 0) {
+		throw new Error(
+			filters.length > 0
+				? `No eval tasks matched: ${filters.join(", ")}`
+				: "No eval tasks are configured",
+		);
+	}
 	process.stdout.write(
 		`Running ${tasks.length} task(s), concurrency ${args.concurrency}${args.dry ? " (dry)" : ` with ${config?.model.provider}/${config?.model.model}`}\n`,
 	);
@@ -454,7 +551,7 @@ async function main(): Promise<void> {
 
 	const outDir = resolve(args.out);
 	await mkdir(outDir, { recursive: true });
-	const stamp = new Date().toISOString().replaceAll(":", "").slice(0, 15);
+	const stamp = new Date().toISOString().replaceAll(/[:.]/g, "");
 	const outPath = join(outDir, `cua-eval-${stamp}.json`);
 	await writeFile(
 		outPath,

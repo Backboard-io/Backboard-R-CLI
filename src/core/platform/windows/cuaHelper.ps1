@@ -25,7 +25,9 @@ Add-Type -Namespace Backboard -Name Native -MemberDefinition @'
 [DllImport("user32.dll")] public static extern bool GetMonitorInfo(IntPtr hMonitor, ref MONITORINFO lpmi);
 [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
 [DllImport("user32.dll")] public static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
-[DllImport("user32.dll")] public static extern int GetSystemMetrics(int index);
+[DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hwnd, IntPtr processId);
+[DllImport("user32.dll")] public static extern IntPtr GetKeyboardLayout(uint threadId);
+[DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern short VkKeyScanEx(char ch, IntPtr keyboardLayout);
 [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left, Top, Right, Bottom; }
 [StructLayout(LayoutKind.Sequential)] public struct MONITORINFO { public int cbSize; public RECT rcMonitor; public RECT rcWork; public uint dwFlags; }
 [StructLayout(LayoutKind.Sequential)] public struct MOUSEINPUT { public int dx, dy; public uint mouseData, dwFlags, time; public IntPtr dwExtraInfo; }
@@ -86,52 +88,74 @@ function Get-TargetDisplay {
 function Invoke-Capture($req) {
   $d = Get-TargetDisplay
   $bmp = New-Object System.Drawing.Bitmap $d.width, $d.height
-  $g = [System.Drawing.Graphics]::FromImage($bmp)
-  $g.CopyFromScreen($d.x, $d.y, 0, 0, (New-Object System.Drawing.Size $d.width, $d.height))
-  $g.Dispose()
-  $source = $bmp
-  $region = $null
-  if ($req.region) {
-    $rx=[int]$req.region.x; $ry=[int]$req.region.y; $rw=[int]$req.region.width; $rh=[int]$req.region.height
-    $rect = New-Object System.Drawing.Rectangle $rx,$ry,$rw,$rh
-    $rect.Intersect((New-Object System.Drawing.Rectangle 0,0,$d.width,$d.height))
-    if ($rect.Width -lt 1 -or $rect.Height -lt 1) { throw 'zoom region is outside the screen' }
-    $source = $bmp.Clone($rect, $bmp.PixelFormat)
-    $bmp.Dispose()
-    $region = @{ x=$rect.X; y=$rect.Y; width=$rect.Width; height=$rect.Height }
+  $source = $null
+  $out = $null
+  try {
+    $g = [System.Drawing.Graphics]::FromImage($bmp)
+    try {
+      $g.CopyFromScreen($d.x, $d.y, 0, 0, (New-Object System.Drawing.Size $d.width, $d.height))
+      $cursor = [System.Windows.Forms.Cursor]::Current
+      if ($null -ne $cursor) {
+        $position = [System.Windows.Forms.Cursor]::Position
+        $cursor.Draw($g, (New-Object System.Drawing.Rectangle ($position.X - $d.x), ($position.Y - $d.y), $cursor.Size.Width, $cursor.Size.Height))
+      }
+    } finally {
+      $g.Dispose()
+    }
+    $source = $bmp
+    $region = $null
+    if ($req.region) {
+      $rx=[int]$req.region.x; $ry=[int]$req.region.y; $rw=[int]$req.region.width; $rh=[int]$req.region.height
+      $rect = New-Object System.Drawing.Rectangle $rx,$ry,$rw,$rh
+      $rect.Intersect((New-Object System.Drawing.Rectangle 0,0,$d.width,$d.height))
+      if ($rect.Width -lt 1 -or $rect.Height -lt 1) { throw 'zoom region is outside the screen' }
+      $source = $bmp.Clone($rect, $bmp.PixelFormat)
+      $region = @{ x=$rect.X; y=$rect.Y; width=$rect.Width; height=$rect.Height }
+    }
+    $maxWidth = if ($req.maxWidth) { [int]$req.maxWidth } else { 1280 }
+    $out = $source
+    if ($source.Width -gt $maxWidth) {
+      $h = [int][math]::Round($source.Height * ($maxWidth / $source.Width))
+      $out = New-Object System.Drawing.Bitmap $maxWidth, [math]::Max($h,1)
+      $g2 = [System.Drawing.Graphics]::FromImage($out)
+      try {
+        $g2.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+        $g2.DrawImage($source, 0, 0, $maxWidth, [math]::Max($h,1))
+      } finally {
+        $g2.Dispose()
+      }
+    }
+    $format = if ($req.format -eq 'jpeg') { 'jpeg' } else { 'png' }
+    if ($format -eq 'jpeg') {
+      $codec = [System.Drawing.Imaging.ImageCodecInfo]::GetImageEncoders() | Where-Object { $_.MimeType -eq 'image/jpeg' }
+      $params = New-Object System.Drawing.Imaging.EncoderParameters 1
+      $q = if ($req.quality) { [int64]([double]$req.quality * 100) } else { 85 }
+      $encoderParam = New-Object System.Drawing.Imaging.EncoderParameter ([System.Drawing.Imaging.Encoder]::Quality), $q
+      try {
+        $params.Param[0] = $encoderParam
+        $out.Save([string]$req.path, $codec, $params)
+      } finally {
+        $encoderParam.Dispose()
+        $params.Dispose()
+      }
+    } else {
+      $out.Save([string]$req.path, [System.Drawing.Imaging.ImageFormat]::Png)
+    }
+    $sourceWidth = if ($region) { $region.width } else { $d.width }
+    $result = @{
+      path=[string]$req.path; bytes=(Get-Item $req.path).Length; format=$format
+      imageSize=@{ width=$out.Width; height=$out.Height }
+      screenSize=@{ width=$d.width; height=$d.height }
+      scale=($out.Width / $sourceWidth)
+      display=@{ displayId=$d.id; origin=@{x=$d.x;y=$d.y}; points=@{width=$d.width;height=$d.height}; pixels=@{width=$d.width;height=$d.height}; scale=1 }
+    }
+    if ($region) { $result.region = $region }
+    return $result
+  } finally {
+    if ($null -ne $out) { $out.Dispose() }
+    if ($null -ne $source -and -not [object]::ReferenceEquals($source, $out)) { $source.Dispose() }
+    if (-not [object]::ReferenceEquals($bmp, $source) -and -not [object]::ReferenceEquals($bmp, $out)) { $bmp.Dispose() }
   }
-  $maxWidth = if ($req.maxWidth) { [int]$req.maxWidth } else { 1280 }
-  $out = $source
-  if ($source.Width -gt $maxWidth) {
-    $h = [int][math]::Round($source.Height * ($maxWidth / $source.Width))
-    $out = New-Object System.Drawing.Bitmap $maxWidth, [math]::Max($h,1)
-    $g2 = [System.Drawing.Graphics]::FromImage($out)
-    $g2.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
-    $g2.DrawImage($source, 0, 0, $maxWidth, [math]::Max($h,1))
-    $g2.Dispose()
-    $source.Dispose()
-  }
-  $format = if ($req.format -eq 'jpeg') { 'jpeg' } else { 'png' }
-  if ($format -eq 'jpeg') {
-    $codec = [System.Drawing.Imaging.ImageCodecInfo]::GetImageEncoders() | Where-Object { $_.MimeType -eq 'image/jpeg' }
-    $params = New-Object System.Drawing.Imaging.EncoderParameters 1
-    $q = if ($req.quality) { [int64]([double]$req.quality * 100) } else { 85 }
-    $params.Param[0] = New-Object System.Drawing.Imaging.EncoderParameter ([System.Drawing.Imaging.Encoder]::Quality), $q
-    $out.Save([string]$req.path, $codec, $params)
-  } else {
-    $out.Save([string]$req.path, [System.Drawing.Imaging.ImageFormat]::Png)
-  }
-  $sourceWidth = if ($region) { $region.width } else { $d.width }
-  $result = @{
-    path=[string]$req.path; bytes=(Get-Item $req.path).Length; format=$format
-    imageSize=@{ width=$out.Width; height=$out.Height }
-    screenSize=@{ width=$d.width; height=$d.height }
-    scale=($out.Width / $sourceWidth)
-    display=@{ displayId=$d.id; origin=@{x=$d.x;y=$d.y}; points=@{width=$d.width;height=$d.height}; pixels=@{width=$d.width;height=$d.height}; scale=1 }
-  }
-  if ($region) { $result.region = $region }
-  $out.Dispose()
-  return $result
 }
 
 $script:InteractiveTypes = @('Button','CheckBox','ComboBox','Edit','Hyperlink','ListItem','MenuItem','RadioButton','TabItem','TreeItem','DataItem','Slider','Spinner','SplitButton','Text','Image','Document','Window','Pane','ScrollBar','Header','HeaderItem','Custom')
@@ -155,11 +179,10 @@ function Invoke-Accessibility($req) {
   $cache.TreeScope = [System.Windows.Automation.TreeScope]::Element -bor [System.Windows.Automation.TreeScope]::Descendants
   $cache.TreeFilter = [System.Windows.Automation.Automation]::ControlViewCondition
   $cached = $root.GetUpdatedCache($cache)
-  $pid = $root.Current.ProcessId
+  $processId = $root.Current.ProcessId
   $appName = $null
-  try { $appName = (Get-Process -Id $pid).ProcessName } catch {}
+  try { $appName = (Get-Process -Id $processId).ProcessName } catch {}
   $focusedId = $null
-  $walker = [System.Windows.Automation.TreeWalker]::ControlViewWalker
   $stack = New-Object System.Collections.Generic.Stack[object]
   $stack.Push(@($cached, 0))
   while ($stack.Count -gt 0 -and $items.Count -lt $max) {
@@ -181,7 +204,7 @@ function Invoke-Accessibility($req) {
     try { $children = $node.CachedChildren } catch {}
     for ($i = $children.Count - 1; $i -ge 0; $i--) { $stack.Push(@($children.Item($i), $depth + 1)) }
   }
-  $result = @{ appName=$appName; processId=$pid; windowTitle=$cached.Cached.Name; elements=$items.ToArray(); trusted=$true }
+  $result = @{ appName=$appName; processId=$processId; windowTitle=$cached.Cached.Name; elements=$items.ToArray(); trusted=$true }
   $wr = $cached.Cached.BoundingRectangle
   if (-not $wr.IsEmpty) { $result.windowBounds = @{ x=[double]($wr.X - $d.x); y=[double]($wr.Y - $d.y); width=[double]$wr.Width; height=[double]$wr.Height } }
   if ($focusedId) { $result.focusedElementId = $focusedId }
@@ -295,22 +318,29 @@ function Invoke-Type($req) {
 
 function Resolve-Key($raw) {
   $key = ([string]$raw).ToUpper()
-  if ($script:VirtualKeys.ContainsKey($key)) { return @{ vk=$script:VirtualKeys[$key]; shift=$false } }
   if ($key.Length -eq 1) {
-    $scan = [System.Windows.Forms.Keys]$null
-    $vk = [Backboard.Native]::GetSystemMetrics(0) # no-op to keep type loaded
-    $code = [int][char]$key
-    if (($code -ge 65 -and $code -le 90) -or ($code -ge 48 -and $code -le 57)) { return @{ vk=$code; shift=$false } }
-    $shifted = @{ '!'='1';'@'='2';'#'='3';'$'='4';'%'='5';'^'='6';'&'='7';'*'='8';'('='9';')'='0';'_'='-';'+'='=';'{'='[';'}'=']';'|'='\';':'=';';'"'="'";'<'=',';'>'='.';'?'='/';'~'='`' }
-    if ($shifted.ContainsKey([string]$raw)) { return @{ vk=$script:VirtualKeys[$shifted[[string]$raw]]; shift=$true } }
+    $character = [char]::ToLowerInvariant([char]$key)
+    $foreground = [Backboard.Native]::GetForegroundWindow()
+    $threadId = [Backboard.Native]::GetWindowThreadProcessId($foreground, [IntPtr]::Zero)
+    $layout = [Backboard.Native]::GetKeyboardLayout($threadId)
+    $mapped = [int][Backboard.Native]::VkKeyScanEx($character, $layout)
+    if ($mapped -ne -1) {
+      $modifierBits = ($mapped -shr 8) -band 0xFF
+      $mappedModifiers = @()
+      if (($modifierBits -band 1) -ne 0) { $mappedModifiers += 'shift' }
+      if (($modifierBits -band 2) -ne 0) { $mappedModifiers += 'control' }
+      if (($modifierBits -band 4) -ne 0) { $mappedModifiers += 'alt' }
+      return @{ vk=($mapped -band 0xFF); modifiers=$mappedModifiers }
+    }
   }
+  if ($script:VirtualKeys.ContainsKey($key)) { return @{ vk=$script:VirtualKeys[$key]; modifiers=@() } }
   throw "Unsupported key: $raw"
 }
 
 function Invoke-Key($req) {
   $resolved = Resolve-Key $req.key
   $mods = @(); if ($req.modifiers) { $mods = @($req.modifiers) }
-  if ($resolved.shift) { $mods += 'shift' }
+  $mods += @($resolved.modifiers)
   $repeat = if ($req.repeat) { [math]::Max(1, [math]::Min(100, [int]$req.repeat)) } else { 1 }
   $hold = if ($req.holdMs) { [int]$req.holdMs } else { 12 }
   $ext = $script:ExtendedKeys -contains $resolved.vk

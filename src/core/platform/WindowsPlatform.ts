@@ -1,4 +1,5 @@
-import { writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdtemp, rename, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { ensureDir, fileExists } from "../../utils/fs.ts";
@@ -7,6 +8,23 @@ import { HelperProcess } from "./HelperProcess.ts";
 import helperSource from "./windows/cuaHelper.ps1" with { type: "text" };
 
 export const WINDOWS_HELPER_SOURCE: string = helperSource;
+
+export function windowsHelperSourceHash(
+	source = WINDOWS_HELPER_SOURCE,
+): string {
+	return createHash("sha256").update(source).digest("hex").slice(0, 12);
+}
+
+export function windowsHelperScriptPath(
+	source = WINDOWS_HELPER_SOURCE,
+): string {
+	return join(
+		homedir(),
+		".backboard",
+		"bin",
+		`cua-helper-${windowsHelperSourceHash(source)}.ps1`,
+	);
+}
 
 /**
  * Windows platform backed by a persistent PowerShell host
@@ -44,9 +62,19 @@ export async function ensureWindowsHelperScript(
 ): Promise<string> {
 	const dir = join(homedir(), ".backboard", "bin");
 	await ensureDir(dir);
-	const path = join(dir, "cua-helper.ps1");
-	if (!(await fileExists(path)) || (await Bun.file(path).text()) !== source) {
-		await writeFile(path, source, "utf8");
+	const path = windowsHelperScriptPath(source);
+	if (await fileExists(path)) return path;
+	const work = await mkdtemp(join(dir, ".cua-helper-"));
+	try {
+		const temporaryPath = join(work, "helper.ps1");
+		await writeFile(temporaryPath, source, "utf8");
+		try {
+			await rename(temporaryPath, path);
+		} catch (err) {
+			if (!(await fileExists(path))) throw err;
+		}
+	} finally {
+		await rm(work, { recursive: true, force: true });
 	}
 	return path;
 }

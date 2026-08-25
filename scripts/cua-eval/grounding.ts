@@ -35,20 +35,34 @@ import {
 } from "./FixturePlatform.ts";
 
 const argv = process.argv.slice(2);
-const filter = argv.includes("-f") ? argv[argv.indexOf("-f") + 1] : undefined;
-const modelArg = argv.includes("--model")
-	? argv[argv.indexOf("--model") + 1]
-	: undefined;
+function optionValue(name: string): string | undefined {
+	const index = argv.indexOf(name);
+	if (index < 0) return undefined;
+	const value = argv[index + 1];
+	if (!value || value.startsWith("-")) {
+		throw new Error(`${name} requires a value`);
+	}
+	return value;
+}
+const valueOptions = new Set(["-f", "--model", "--dir"]);
+const flags = new Set(["--coords", "--blind", "--backboard", "--sso"]);
+for (let index = 0; index < argv.length; index++) {
+	const arg = argv[index] as string;
+	if (valueOptions.has(arg)) {
+		optionValue(arg);
+		index++;
+	} else if (!flags.has(arg)) {
+		throw new Error(`Unknown option: ${arg}`);
+	}
+}
+const filter = optionValue("-f");
+const modelArg = optionValue("--model");
 const coords = argv.includes("--coords");
 // --blind strips every element so only the image can ground the click.
 const blind = argv.includes("--blind");
 // --backboard sends through BackboardClient even when a BYOK key exists.
 const viaBackboard = argv.includes("--backboard");
-const dir = resolve(
-	argv.includes("--dir")
-		? (argv[argv.indexOf("--dir") + 1] ?? "")
-		: "tests/fixtures/cua-grounding",
-);
+const dir = resolve(optionValue("--dir") ?? "tests/fixtures/cua-grounding");
 
 // --sso uses the CLI's own login (~/.backboard) instead of eval .env keys.
 const sso = argv.includes("--sso");

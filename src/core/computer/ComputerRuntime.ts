@@ -34,7 +34,14 @@ export interface ComputerExecuteOptions {
 	stopOnError?: boolean;
 }
 
+interface ComputerSessionState {
+	lastObservation: ComputerObservation | null;
+	liveElements: AccessibilityElement[] | null;
+	elementsDirty: boolean;
+}
+
 const SKIPPED_SUMMARY = "Not executed: an earlier action in this batch failed.";
+const MAX_SESSION_STATES = 4;
 
 /**
  * Runs a batch of computer actions with the semantics every major provider
@@ -45,10 +52,8 @@ const SKIPPED_SUMMARY = "Not executed: an earlier action in this batch failed.";
 export class ComputerRuntime {
 	private platformInstance: Platform | null;
 	private observers = new Map<string, ComputerObserver>();
+	private sessionStates = new Map<string, ComputerSessionState>();
 	private lastObservation: ComputerObservation | null = null;
-	/** Elements of `lastObservation` with bounds refreshed after state changes. */
-	private liveElements: AccessibilityElement[] | null = null;
-	private elementsDirty = false;
 	private readonly settleTimeoutMs: number;
 	private readonly openAppSettleTimeoutMs: number;
 
@@ -74,12 +79,38 @@ export class ComputerRuntime {
 	): Promise<ComputerQueueResult> {
 		const startedAt = performance.now();
 		const observer = this.observerFor(ctx.sessionId);
+		const state = this.stateFor(ctx.sessionId);
 		const results: ComputerActionResult[] = [];
 		let stoppedAt: number | undefined;
 		let stateChanged = false;
 		let launchedApp = false;
 		let finalObservation: ComputerObservation | null = null;
 		let actionsMs = 0;
+		let settleMs = 0;
+		let settled: boolean | undefined;
+
+		const settleScreen = async (): Promise<void> => {
+			if (!stateChanged) return;
+			const settleStart = performance.now();
+			try {
+				const outcome = await this.platform.settle(
+					{
+						timeoutMs: launchedApp
+							? this.openAppSettleTimeoutMs
+							: this.settleTimeoutMs,
+						initialDelayMs: launchedApp ? 750 : 80,
+					},
+					ctx.signal,
+				);
+				settled = outcome.settled;
+			} catch (err) {
+				if (ctx.signal.aborted) throw err;
+				settled = false;
+			}
+			settleMs += Math.round(performance.now() - settleStart);
+			stateChanged = false;
+			launchedApp = false;
+		};
 
 		for (const [index, action] of actions.entries()) {
 			if (ctx.signal.aborted) throw new Error("aborted");
@@ -96,20 +127,33 @@ export class ComputerRuntime {
 			if (index > 0 && options.defaultDelayMs) {
 				await delay(options.defaultDelayMs, ctx.signal);
 			}
+			if (
+				stateChanged &&
+				(action.action === "screenshot" ||
+					action.action === "zoom" ||
+					launchedApp)
+			) {
+				await settleScreen();
+			}
 			const started = performance.now();
-			const outcome = await this.executeOne(action, ctx, observer);
+			const outcome = await this.executeOne(action, ctx, observer, state);
 			const durationMs = Math.round(performance.now() - started);
 			actionsMs += durationMs;
 			results.push({ ...outcome.result, durationMs });
 			if (outcome.observation) {
 				finalObservation = outcome.observation;
 				stateChanged = false;
+			} else {
+				// Every action after an observation may affect what the user sees:
+				// waits allow async UI updates, moves can reveal hover UI, and even
+				// failed actions need a fresh screen for recovery.
+				finalObservation = null;
 			}
 			if (outcome.result.success) {
 				if (STATE_CHANGING_COMPUTER_ACTIONS.has(action.action)) {
 					stateChanged = true;
 					finalObservation = null;
-					this.elementsDirty = true;
+					state.elementsDirty = true;
 				}
 				if (action.action === "openApp") launchedApp = true;
 			} else if (options.stopOnError !== false) {
@@ -117,37 +161,13 @@ export class ComputerRuntime {
 			}
 		}
 
-		let settleMs = 0;
-		let settled: boolean | undefined;
 		let observeMs = 0;
-		const needsObservation =
-			!finalObservation && (stateChanged || stoppedAt !== undefined);
-		if (
-			needsObservation ||
-			(!finalObservation && this.lastObservation === null)
-		) {
-			if (stateChanged) {
-				const settleStart = performance.now();
-				try {
-					const outcome = await this.platform.settle(
-						{
-							timeoutMs: launchedApp
-								? this.openAppSettleTimeoutMs
-								: this.settleTimeoutMs,
-						},
-						ctx.signal,
-					);
-					settled = outcome.settled;
-				} catch (err) {
-					if (ctx.signal.aborted) throw err;
-					settled = false;
-				}
-				settleMs = Math.round(performance.now() - settleStart);
-			}
+		if (!finalObservation && actions.length > 0) {
+			await settleScreen();
 			const observeStart = performance.now();
 			try {
 				finalObservation = await observer.observe(ctx.signal);
-				this.remember(finalObservation);
+				this.remember(state, finalObservation);
 			} catch (err) {
 				if (ctx.signal.aborted) throw err;
 				results.push({
@@ -182,28 +202,60 @@ export class ComputerRuntime {
 		const platform = this.platformInstance;
 		this.platformInstance = this.options.platform ?? null;
 		this.observers.clear();
+		this.sessionStates.clear();
+		this.lastObservation = null;
 		await platform?.dispose();
 	}
 
 	private observerFor(sessionId: string): ComputerObserver {
 		let observer = this.observers.get(sessionId);
-		if (!observer) {
+		if (observer) {
+			this.observers.delete(sessionId);
+			this.observers.set(sessionId, observer);
+		} else {
 			observer = new ComputerObserver(sessionId, this.platform);
 			this.observers.set(sessionId, observer);
 		}
 		return observer;
 	}
 
-	private remember(observation: ComputerObservation): void {
+	private stateFor(sessionId: string): ComputerSessionState {
+		let state = this.sessionStates.get(sessionId);
+		if (state) {
+			this.sessionStates.delete(sessionId);
+			this.sessionStates.set(sessionId, state);
+		} else {
+			state = {
+				lastObservation: null,
+				liveElements: null,
+				elementsDirty: false,
+			};
+			this.sessionStates.set(sessionId, state);
+		}
+		while (this.sessionStates.size > MAX_SESSION_STATES) {
+			const oldest = this.sessionStates.keys().next().value;
+			if (oldest === undefined) break;
+			this.sessionStates.delete(oldest);
+			this.observers.delete(oldest);
+		}
+		return state;
+	}
+
+	private remember(
+		state: ComputerSessionState,
+		observation: ComputerObservation,
+	): void {
+		state.lastObservation = observation;
+		state.liveElements = observation.elements;
+		state.elementsDirty = false;
 		this.lastObservation = observation;
-		this.liveElements = observation.elements;
-		this.elementsDirty = false;
 	}
 
 	private async executeOne(
 		action: ComputerAction,
 		ctx: ToolContext,
 		observer: ComputerObserver,
+		state: ComputerSessionState,
 	): Promise<{
 		result: Omit<ComputerActionResult, "durationMs">;
 		observation?: ComputerObservation;
@@ -212,7 +264,7 @@ export class ComputerRuntime {
 			switch (action.action) {
 				case "screenshot": {
 					const observation = await observer.observe(ctx.signal);
-					this.remember(observation);
+					this.remember(state, observation);
 					return {
 						result: {
 							success: true,
@@ -223,30 +275,48 @@ export class ComputerRuntime {
 					};
 				}
 				case "zoom": {
-					if (!this.lastObservation) {
+					if (!state.lastObservation) {
 						throw new Error(
 							"Take a screenshot before zooming so the region is in a known coordinate space.",
 						);
+					}
+					if (state.elementsDirty) {
+						try {
+							const fresh = await observer.accessibility(ctx.signal);
+							state.liveElements = refreshElementBounds(
+								state.liveElements ?? state.lastObservation.elements,
+								fresh.elements,
+							);
+						} catch (err) {
+							if (ctx.signal.aborted) throw err;
+						}
+						state.elementsDirty = false;
 					}
 					const observation = await observer.observe(ctx.signal, {
 						region: action.region,
 					});
 					// A zoom does not replace the full-screen element list.
+					const zoomObservation = {
+						...observation,
+						elements: state.liveElements ?? state.lastObservation.elements,
+					};
+					state.lastObservation = {
+						...state.lastObservation,
+						screenSize: observation.screenSize,
+					};
+					this.lastObservation = zoomObservation;
 					return {
 						result: {
 							success: true,
 							action: action.action,
 							summary: observation.summary,
 						},
-						observation: {
-							...observation,
-							elements: this.liveElements ?? this.lastObservation.elements,
-							screenSize: this.lastObservation.screenSize,
-						},
+						observation: zoomObservation,
 					};
 				}
 				case "wait":
 					await delay(action.durationMs, ctx.signal);
+					state.elementsDirty = true;
 					return {
 						result: {
 							success: true,
@@ -255,7 +325,7 @@ export class ComputerRuntime {
 						},
 					};
 				default: {
-					const resolver = await this.resolverFor(action, ctx, observer);
+					const resolver = await this.resolverFor(action, ctx, observer, state);
 					const platformAction = toPlatformAction(action, resolver);
 					await this.platform.execute(platformAction, ctx.signal);
 					return {
@@ -290,23 +360,24 @@ export class ComputerRuntime {
 		action: ComputerAction,
 		ctx: ToolContext,
 		observer: ComputerObserver,
+		state: ComputerSessionState,
 	): Promise<ObservationTargetResolver> {
-		if (this.lastObservation && this.elementsDirty && usesElementId(action)) {
+		if (state.lastObservation && state.elementsDirty && usesElementId(action)) {
 			try {
 				const fresh = await observer.accessibility(ctx.signal);
-				this.liveElements = refreshElementBounds(
-					this.liveElements ?? this.lastObservation.elements,
+				state.liveElements = refreshElementBounds(
+					state.liveElements ?? state.lastObservation.elements,
 					fresh.elements,
 				);
 			} catch (err) {
 				if (ctx.signal.aborted) throw err;
 				// Fall back to the previous bounds.
 			}
-			this.elementsDirty = false;
+			state.elementsDirty = false;
 		}
 		return new ObservationTargetResolver(
-			this.lastObservation,
-			this.liveElements,
+			state.lastObservation,
+			state.liveElements,
 		);
 	}
 }

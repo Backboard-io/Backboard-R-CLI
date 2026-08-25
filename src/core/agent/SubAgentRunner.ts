@@ -122,7 +122,7 @@ export class SubAgentRunner {
 			thinking,
 			thinkingResolver,
 			requestKind: "subagent",
-			maxToolRounds: MAX_SUBAGENT_TOOL_ROUNDS,
+			maxToolRounds: this.deps.maxToolRounds ?? MAX_SUBAGENT_TOOL_ROUNDS,
 		});
 
 		try {

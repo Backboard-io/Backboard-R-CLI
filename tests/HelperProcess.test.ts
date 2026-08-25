@@ -2,7 +2,12 @@ import { afterEach, describe, expect, it } from "bun:test";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { HelperPlatform } from "../src/core/platform/HelperPlatform.ts";
 import { HelperProcess } from "../src/core/platform/HelperProcess.ts";
+import {
+	windowsHelperScriptPath,
+	windowsHelperSourceHash,
+} from "../src/core/platform/WindowsPlatform.ts";
 
 const tempDirs: string[] = [];
 const helpers: HelperProcess[] = [];
@@ -14,6 +19,20 @@ afterEach(async () => {
 		tempDirs.map((dir) => rm(dir, { recursive: true, force: true })),
 	);
 	tempDirs.length = 0;
+});
+
+describe("Windows helper cache", () => {
+	it("uses a source-versioned helper path", () => {
+		expect(windowsHelperSourceHash("one")).not.toBe(
+			windowsHelperSourceHash("two"),
+		);
+		expect(windowsHelperScriptPath("one")).not.toBe(
+			windowsHelperScriptPath("two"),
+		);
+		expect(windowsHelperScriptPath("one")).toEndWith(
+			`cua-helper-${windowsHelperSourceHash("one")}.ps1`,
+		);
+	});
 });
 
 /** A tiny JSON-lines echo server with a few scripted behaviours. */
@@ -29,7 +48,8 @@ process.stdin.on("data", (chunk) => {
     if (!line.trim()) continue;
     const req = JSON.parse(line);
     if (req.op === "die") { process.stderr.write("fatal: asked to die"); process.exit(3); }
-    if (req.op === "hang") continue;
+    if (req.op === "hang") { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 60_000); continue; }
+    if (req.op === "hold") { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50); }
     if (req.op === "fail") { process.stdout.write(JSON.stringify({ id: req.id, ok: false, error: "nope" }) + "\\n"); continue; }
     if (req.op === "noise") { process.stdout.write("garbage line\\n"); }
     process.stdout.write(JSON.stringify({ id: req.id, ok: true, echo: req, pid: process.pid }) + "\\n");
@@ -93,15 +113,35 @@ describe("HelperProcess", () => {
 		await expect(helper.request({ op: "hang" })).rejects.toThrow(
 			"within 100ms",
 		);
+		const before = await helper.request<{ pid: number }>({ op: "ping" });
 		const controller = new AbortController();
 		const pending = helper.request(
-			{ op: "hang" },
-			{ signal: controller.signal, timeoutMs: 5000 },
+			{ op: "hold" },
+			{ signal: controller.signal, timeoutMs: 1000 },
 		);
 		controller.abort();
 		await expect(pending).rejects.toThrow("aborted");
-		const after = await helper.request<{ ok: boolean }>({ op: "ping" });
+		const after = await helper.request<{ ok: boolean; pid: number }>({
+			op: "ping",
+		});
 		expect(after.ok).toBe(true);
+		expect(after.pid).toBe(before.pid);
+	});
+
+	it("waits for an aborted native action to drain before disposal", async () => {
+		const helper = await fakeHelper();
+		const controller = new AbortController();
+		const pending = helper.request(
+			{ op: "hold" },
+			{ signal: controller.signal, timeoutMs: 1000 },
+		);
+		await Bun.sleep(10);
+		controller.abort();
+		await expect(pending).rejects.toThrow("aborted");
+		const started = performance.now();
+		await helper.dispose();
+		expect(performance.now() - started).toBeGreaterThanOrEqual(25);
+		expect(helper.isRunning).toBe(false);
 	});
 
 	it("fails pending requests when the process dies, then respawns", async () => {
@@ -120,5 +160,27 @@ describe("HelperProcess", () => {
 		await helper.dispose();
 		expect(helper.isRunning).toBe(false);
 		await expect(helper.request({ op: "ping" })).rejects.toThrow("disposed");
+	});
+});
+
+describe("HelperPlatform", () => {
+	it("disposes a helper that finishes starting during shutdown", async () => {
+		const helper = await fakeHelper();
+		class DelayedPlatform extends HelperPlatform {
+			readonly os = "darwin" as const;
+
+			protected override async createHelper(): Promise<HelperProcess> {
+				await Bun.sleep(20);
+				return helper;
+			}
+		}
+
+		const platform = new DelayedPlatform();
+		const pending = platform.accessibilitySnapshot(
+			new AbortController().signal,
+		);
+		await platform.dispose();
+		await expect(pending).rejects.toThrow("disposed");
+		expect(helper.isRunning).toBe(false);
 	});
 });

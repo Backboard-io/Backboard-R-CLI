@@ -47,7 +47,7 @@ const KEY_ALIASES: Record<string, string> = {
 	PAGE_UP: "PAGEUP",
 	PAGE_DOWN: "PAGEDOWN",
 	BACK_SPACE: "BACKSPACE",
-	PLUS: "=",
+	PLUS: "+",
 	MINUS: "-",
 	COMMA: ",",
 	PERIOD: ".",

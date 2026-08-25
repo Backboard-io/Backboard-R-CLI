@@ -66,6 +66,7 @@ export const STATE_CHANGING_COMPUTER_ACTIONS: ReadonlySet<ComputerActionName> =
 	new Set<ComputerActionName>([
 		"click",
 		"drag",
+		"move",
 		"scroll",
 		"type",
 		"key",

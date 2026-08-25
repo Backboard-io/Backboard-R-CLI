@@ -53,47 +53,23 @@ PY
 sleep 0.5
 `;
 
-/** The runner injects DISPLAY and the session D-Bus address into every exec. */
-export const XFCONF = "xfconf-query";
-
-async function xfconf(
-	sandbox: EvalSandbox,
-	channel: string,
-	property: string,
-): Promise<string> {
-	const live = await sandbox.exec(
-		`${XFCONF} -c ${channel} -p ${property} 2>/dev/null`,
-	);
-	if (live.exitCode === 0 && live.output.trim()) return live.output.trim();
-	const name = property.split("/").pop() ?? "";
-	const xml = await sandbox.exec(
-		`grep -o 'name="${name}"[^>]*value="[^"]*"' ~/.config/xfce4/xfconf/xfce-perchannel-xml/${channel}.xml 2>/dev/null | sed 's/.*value="//; s/"$//' | head -n1`,
-	);
-	return xml.output.trim();
-}
-
 async function fileEquals(
 	sandbox: EvalSandbox,
 	path: string,
 	expected: string,
 ): Promise<{ pass: boolean; detail: string }> {
 	const result = await sandbox.exec(`cat ${path} 2>/dev/null`);
-	const actual = result.output.trim();
+	const withoutFinalNewline = (value: string): string =>
+		value.endsWith("\r\n")
+			? value.slice(0, -2)
+			: value.endsWith("\n")
+				? value.slice(0, -1)
+				: value;
+	const actual = withoutFinalNewline(result.output);
+	const wanted = withoutFinalNewline(expected);
 	return {
-		pass: actual === expected.trim(),
-		detail: `expected ${JSON.stringify(expected.trim())}, got ${JSON.stringify(actual.slice(0, 120))}`,
-	};
-}
-
-async function fileContains(
-	sandbox: EvalSandbox,
-	path: string,
-	needle: string,
-): Promise<{ pass: boolean; detail: string }> {
-	const result = await sandbox.exec(`cat ${path} 2>/dev/null`);
-	return {
-		pass: result.output.includes(needle),
-		detail: `looking for ${JSON.stringify(needle)} in ${JSON.stringify(result.output.slice(0, 160))}`,
+		pass: actual === wanted,
+		detail: `expected ${JSON.stringify(wanted)}, got ${JSON.stringify(actual.slice(0, 120))}`,
 	};
 }
 
@@ -188,7 +164,7 @@ export const EVAL_TASKS: EvalTask[] = [
 		setup: [],
 		check: async (sb) => {
 			const listed = await sb.exec(
-				`${XFCONF} -c xfce4-desktop -l -v 2>/dev/null | grep -i image-style || grep -o 'image-style" type="int" value="[0-9]*"' ~/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-desktop.xml 2>/dev/null || echo none`,
+				`xfconf-query -c xfce4-desktop -l -v 2>/dev/null | grep -i image-style || grep -o 'image-style" type="int" value="[0-9]*"' ~/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-desktop.xml 2>/dev/null || echo none`,
 			);
 			return {
 				pass: /image-style[^0-9]+0\b/.test(listed.output),
@@ -212,13 +188,18 @@ export const EVAL_TASKS: EvalTask[] = [
 			const result = await sb.exec(
 				"cat /tmp/cua-web/submissions.log 2>/dev/null",
 			);
-			const body = result.output.trim();
+			const submissions = result.output
+				.split("\n")
+				.filter((body) => body.trim().length > 0);
+			const body = submissions[0] ?? "";
+			const submitted =
+				submissions.length === 1 &&
+				body.includes("name=Ada+Lovelace") &&
+				body.includes("email=ada%40example.com") &&
+				body.includes("weekly=on");
 			return {
-				pass:
-					body.includes("name=Ada+Lovelace") &&
-					body.includes("email=ada%40example.com") &&
-					body.includes("weekly=on"),
-				detail: body.slice(0, 200) || "no submission",
+				pass: submitted,
+				detail: result.output.slice(0, 200) || "no submission",
 			};
 		},
 	},
@@ -235,7 +216,7 @@ export const EVAL_TASKS: EvalTask[] = [
 			"rm -f /home/daytona/headline.txt",
 		],
 		check: (sb) =>
-			fileContains(sb, "/home/daytona/headline.txt", "Newsletter signup"),
+			fileEquals(sb, "/home/daytona/headline.txt", "Newsletter signup"),
 	},
 	{
 		id: "multi-editor-to-terminal",
@@ -276,4 +257,5 @@ export const BROWSER_CANDIDATES = [
 export const REQUIRED_PACKAGES = [
 	...new Set(EVAL_TASKS.flatMap((task) => task.packages ?? [])),
 	"xfce4-terminal",
+	"xdotool",
 ];

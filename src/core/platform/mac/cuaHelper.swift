@@ -421,6 +421,7 @@ func accessibilitySnapshot(params: [String: Any], display: TargetDisplay) -> [St
 	// "window" is itself a sheet, also include the document window behind it
 	// (and its title) so the model sees both the modal and its context.
 	let focusedRole = axString(window, kAXRoleAttribute) ?? ""
+	let focusedSubrole = axString(window, kAXSubroleAttribute) ?? ""
 	if let windows = axValue(root, kAXWindowsAttribute) as? [AXUIElement] {
 		for other in windows where !CFEqual(other, window) {
 			let role = axString(other, kAXRoleAttribute) ?? ""
@@ -435,7 +436,9 @@ func accessibilitySnapshot(params: [String: Any], display: TargetDisplay) -> [St
 			}
 		}
 	}
-	if focusedRole == "AXSheet" { payload["modal"] = true }
+	if focusedRole == "AXSheet" || focusedSubrole == "AXDialog" || focusedSubrole == "AXSystemDialog" {
+		payload["modal"] = true
+	}
 	payload["elements"] = collector.elements
 	if let focusedId = collector.focusedId { payload["focusedElementId"] = focusedId }
 	return payload
@@ -545,14 +548,6 @@ func modifierFlag(_ modifier: String) -> (CGEventFlags, CGKeyCode)? {
 	case "fn": return (.maskSecondaryFn, 63)
 	default: return nil
 	}
-}
-
-func modifierFlags(_ modifiers: [String]) -> CGEventFlags {
-	var flags = CGEventFlags()
-	for modifier in modifiers {
-		if let (flag, _) = modifierFlag(modifier) { flags.insert(flag) }
-	}
-	return flags
 }
 
 /// Holds modifiers around `body` by posting real modifier key-down/up events.
@@ -676,7 +671,12 @@ func typeText(params: [String: Any]) throws {
 	let scalars = Array(text.utf16)
 	var index = 0
 	while index < scalars.count {
-		let end = min(index + 20, scalars.count)
+		var end = min(index + 20, scalars.count)
+		if end < scalars.count,
+			(0xD800...0xDBFF).contains(scalars[end - 1]),
+			(0xDC00...0xDFFF).contains(scalars[end]) {
+			end -= 1
+		}
 		var chunk = Array(scalars[index..<end])
 		if let down = CGEvent(keyboardEventSource: eventSource, virtualKey: 0, keyDown: true) {
 			down.keyboardSetUnicodeString(stringLength: chunk.count, unicodeString: &chunk)

@@ -18,6 +18,7 @@ import {
 	usesNativeAdaptiveThinking,
 } from "../thinking.ts";
 import {
+	GOOGLE_TOOL_IMAGE_MEDIA_TYPES,
 	planToolImages,
 	renderToolResult,
 	TOOL_IMAGE_NOTE,
@@ -331,7 +332,11 @@ export function renderGoogleContents(
 	// Names, not ids, key a functionResponse - resolve each result's name from
 	// the call that produced it.
 	const callNames = new Map<string, string>();
-	const imagePlan = planToolImages(messages);
+	const imagePlan = planToolImages(
+		messages,
+		undefined,
+		GOOGLE_TOOL_IMAGE_MEDIA_TYPES,
+	);
 
 	for (const [messageIndex, message] of messages.entries()) {
 		if (message.role === "user") {
@@ -361,6 +366,7 @@ export function renderGoogleContents(
 			const rendered = renderToolResult(
 				result.output,
 				imagePlan.has(`${messageIndex}:${resultIndex}`),
+				GOOGLE_TOOL_IMAGE_MEDIA_TYPES,
 			);
 			parts.push({
 				functionResponse: {

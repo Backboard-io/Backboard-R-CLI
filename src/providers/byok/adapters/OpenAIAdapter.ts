@@ -102,6 +102,15 @@ function isChatModel(id: string): boolean {
 	);
 }
 
+export function openAIModelAcceptsImages(model: string): boolean {
+	const normalized = model.startsWith("ft:")
+		? (model.split(":")[1] ?? model)
+		: model;
+	return !/^(?:gpt-3\.5(?:-|$)|gpt-4(?:-32k)?(?:$|-(?:0314|0613)$)|gpt-4-(?:0125|1106)-preview$|gpt-4-turbo-preview$|o1-(?:mini|preview)(?:-|$)|o3-mini(?:-|$))/i.test(
+		normalized,
+	);
+}
+
 async function* streamOpenAI(
 	request: ByokStreamRequest,
 	key: string,
@@ -304,10 +313,16 @@ function parseArguments(args: string): unknown {
 
 export function toOpenAIMessages(request: ByokStreamRequest): unknown[] {
 	const out: unknown[] = [{ role: "system", content: request.systemPrompt }];
-	const imagePlan = planToolImages(request.messages);
+	const acceptsImages = openAIModelAcceptsImages(request.model);
+	const imagePlan = acceptsImages
+		? planToolImages(request.messages)
+		: new Set<string>();
 	for (const [messageIndex, message] of request.messages.entries()) {
 		if (message.role === "user") {
-			out.push({ role: "user", content: userContent(message) });
+			out.push({
+				role: "user",
+				content: userContent(message, acceptsImages),
+			});
 			continue;
 		}
 		if (message.role === "assistant") {
@@ -336,6 +351,8 @@ export function toOpenAIMessages(request: ByokStreamRequest): unknown[] {
 			const rendered = renderToolResult(
 				result.output,
 				imagePlan.has(`${messageIndex}:${resultIndex}`),
+				undefined,
+				acceptsImages ? "older screenshot" : "model does not accept images",
 			);
 			out.push({
 				role: "tool",
@@ -361,6 +378,7 @@ export function toOpenAIMessages(request: ByokStreamRequest): unknown[] {
 
 function userContent(
 	message: Extract<ByokMessage, { role: "user" }>,
+	withImages = true,
 ): string | unknown[] {
 	const attachments = message.attachments ?? [];
 	if (attachments.length === 0) return message.content;
@@ -368,12 +386,19 @@ function userContent(
 	const parts: unknown[] = [];
 	for (const attachment of attachments) {
 		if (attachment.base64) {
-			parts.push({
-				type: "image_url",
-				image_url: {
-					url: `data:${attachment.mediaType};base64,${attachment.base64}`,
-				},
-			});
+			parts.push(
+				withImages
+					? {
+							type: "image_url",
+							image_url: {
+								url: `data:${attachment.mediaType};base64,${attachment.base64}`,
+							},
+						}
+					: {
+							type: "text",
+							text: `Attached image ${attachment.path} omitted because this model does not accept images.`,
+						},
+			);
 		} else if (attachment.text) {
 			parts.push({
 				type: "text",

@@ -44,6 +44,7 @@ export abstract class HelperPlatform implements Platform {
 	abstract readonly os: PlatformOs;
 	private helper: HelperProcess | null = null;
 	private helperReady: Promise<HelperProcess> | null = null;
+	private disposed = false;
 
 	protected abstract createHelper(signal: AbortSignal): Promise<HelperProcess>;
 
@@ -114,21 +115,43 @@ export abstract class HelperPlatform implements Platform {
 
 	async execute(action: PlatformAction, signal: AbortSignal): Promise<void> {
 		const helper = await this.getHelper(signal);
-		await helper.request(helperRequest(action), { signal });
+		await helper.request(helperRequest(action), {
+			signal,
+			...(action.kind === "holdKey"
+				? { timeoutMs: action.durationMs + 5000 }
+				: {}),
+		});
 	}
 
 	async dispose(): Promise<void> {
 		const helper = this.helper;
+		const helperReady = this.helperReady;
+		this.disposed = true;
 		this.helper = null;
 		this.helperReady = null;
-		await helper?.dispose();
+		const pendingHelper = await helperReady?.catch(() => null);
+		await Promise.all(
+			[helper, pendingHelper]
+				.filter(
+					(candidate, index, all): candidate is HelperProcess =>
+						candidate != null && all.indexOf(candidate) === index,
+				)
+				.map((candidate) => candidate.dispose()),
+		);
 	}
 
 	private getHelper(signal: AbortSignal): Promise<HelperProcess> {
+		if (this.disposed) {
+			return Promise.reject(new Error("platform has been disposed"));
+		}
 		if (this.helper) return Promise.resolve(this.helper);
 		if (!this.helperReady) {
 			this.helperReady = this.createHelper(signal)
-				.then((helper) => {
+				.then(async (helper) => {
+					if (this.disposed) {
+						await helper.dispose();
+						throw new Error("platform has been disposed");
+					}
 					this.helper = helper;
 					return helper;
 				})

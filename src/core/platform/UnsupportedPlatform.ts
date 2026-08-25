@@ -11,7 +11,7 @@ export class UnsupportedPlatform implements Platform {
 	readonly os: PlatformOs;
 
 	constructor(private readonly platform: string) {
-		this.os = platform === "linux" ? "linux" : "linux";
+		this.os = "linux";
 	}
 
 	async screenshot(): Promise<ScreenshotCapture> {

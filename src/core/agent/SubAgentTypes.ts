@@ -26,6 +26,7 @@ export interface SubAgentRunnerDeps {
 	getThinkingResolver?: () => Promise<RuntimeThinkingResolver>;
 	systemPrompt: string;
 	toolFactory: SubAgentToolFactory;
+	maxToolRounds?: number;
 	isToolEnabled?: (name: string) => boolean;
 	hookController?: HookController;
 	lsp?: LspService;

@@ -1,8 +1,4 @@
 import { z } from "zod";
-import type {
-	PermissionCheckContext,
-	PermissionDecision,
-} from "../core/permissions/types.ts";
 import type { Skill } from "../core/skills/Skill.ts";
 import type { SkillsShListItem } from "../core/skills/skillsSh.ts";
 import { Tool } from "../core/tools/Tool.ts";
@@ -96,16 +92,6 @@ export class FindSkillTool extends Tool<Input, Output> {
 
 	override isConcurrencySafe(): boolean {
 		return false;
-	}
-
-	override checkPermissions(
-		_input: Input,
-		ctx: PermissionCheckContext,
-	): PermissionDecision | undefined {
-		if (ctx.mode === "auto") {
-			return { behavior: "allow", reason: "skill discovery (auto mode)" };
-		}
-		return undefined;
 	}
 
 	override summarizeInput(input: Input): string | undefined {
@@ -218,10 +204,14 @@ export class FindSkillTool extends Tool<Input, Output> {
 
 		// A download runs third-party code and needs a human confirm; a sub-agent
 		// can't prompt, so surface the candidate instead of throwing on askUser.
-		if ((ctx.agentDepth ?? 0) > 0) {
+		if ((ctx.agentDepth ?? 0) > 0 || ctx.permissions?.interactive === false) {
+			const reason =
+				(ctx.agentDepth ?? 0) > 0
+					? "a sub-agent cannot prompt"
+					: "this run is non-interactive";
 			return ok(
 				{ task: input.task, candidates: remoteCandidates(ranked) },
-				`Found "${c.slug}" on skills.sh, but downloading a third-party skill must be confirmed by the user and a sub-agent cannot prompt. Ask the main agent to run find_skill for this task.`,
+				`Found "${c.slug}" on skills.sh, but downloading a third-party skill must be confirmed by the user and ${reason}. Run find_skill in an interactive main-agent session for this task.`,
 				"Confirmation needed",
 			);
 		}

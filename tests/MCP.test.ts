@@ -1079,41 +1079,46 @@ describe("McpToolAdapter", () => {
 
 		expect(unannotated.isReadOnly({})).toBe(false);
 		expect(unannotated.isConcurrencySafe({})).toBe(false);
+		expect(unannotated.isDestructive({})).toBe(true);
 		expect(destructive.isReadOnly({})).toBe(false);
 		expect(destructive.isDestructive({})).toBe(true);
 	});
 
-	it("allows non-destructive MCP tools in auto mode", () => {
-		const tool = new McpToolAdapter(fakeDefinition({}));
+	it("does not auto-allow MCP tools from untrusted annotations", () => {
+		const tools = [
+			new McpToolAdapter(fakeDefinition({})),
+			new McpToolAdapter(
+				fakeDefinition({
+					annotations: { destructiveHint: false },
+					trustAnnotations: false,
+				}),
+			),
+		];
 
-		expect(
-			tool.checkPermissions(
-				{},
-				{ mode: "auto", cwd: "/tmp", interactive: true },
-			),
-		).toEqual({
-			behavior: "allow",
-			reason: "non-destructive MCP tool (auto mode)",
-		});
-		expect(
-			tool.checkPermissions(
-				{},
-				{ mode: "acceptEdits", cwd: "/tmp", interactive: true },
-			),
-		).toBeUndefined();
+		for (const tool of tools) {
+			expect(
+				tool.checkPermissions(
+					{},
+					{ mode: "auto", cwd: "/tmp", interactive: true },
+				),
+			).toBeUndefined();
+			expect(tool.isDestructive({})).toBe(true);
+		}
 	});
 
-	it("keeps explicitly destructive MCP tools gated in auto mode", () => {
-		const tool = new McpToolAdapter(
-			fakeDefinition({ annotations: { destructiveHint: true } }),
+	it("applies MCP annotation defaults only after trust", () => {
+		const additive = new McpToolAdapter(
+			fakeDefinition({
+				annotations: { destructiveHint: false },
+				trustAnnotations: true,
+			}),
+		);
+		const omitted = new McpToolAdapter(
+			fakeDefinition({ trustAnnotations: true }),
 		);
 
-		expect(
-			tool.checkPermissions(
-				{},
-				{ mode: "auto", cwd: "/tmp", interactive: true },
-			),
-		).toBeUndefined();
+		expect(additive.isDestructive({})).toBe(false);
+		expect(omitted.isDestructive({})).toBe(true);
 	});
 
 	it("ignores readOnlyHint until the user's config trusts the server", () => {

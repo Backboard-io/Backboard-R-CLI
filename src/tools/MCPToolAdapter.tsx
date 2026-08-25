@@ -1,9 +1,5 @@
 import { z } from "zod";
 import type { McpCallResult, McpToolDefinition } from "../core/mcp/MCPTypes.ts";
-import type {
-	PermissionCheckContext,
-	PermissionDecision,
-} from "../core/permissions/types.ts";
 import type { OpenAITool } from "../core/tools/schema.ts";
 import { Tool } from "../core/tools/Tool.ts";
 import type { ToolContext } from "../core/tools/ToolContext.ts";
@@ -76,20 +72,9 @@ export class McpToolAdapter extends Tool<
 	}
 
 	override isDestructive(_input: Record<string, unknown>): boolean {
-		return this.definition.annotations?.destructiveHint === true;
-	}
-
-	override checkPermissions(
-		input: Record<string, unknown>,
-		ctx: PermissionCheckContext,
-	): PermissionDecision | undefined {
-		if (ctx.mode === "auto" && !this.isDestructive(input)) {
-			return {
-				behavior: "allow",
-				reason: "non-destructive MCP tool (auto mode)",
-			};
-		}
-		return undefined;
+		if (!this.definition.trustAnnotations) return true;
+		if (this.claimsReadOnly()) return false;
+		return this.definition.annotations?.destructiveHint !== false;
 	}
 
 	async execute(

@@ -49,4 +49,10 @@ describe("buildPermissionContext", () => {
 		expect(context.rules.allow).toHaveLength(1);
 		expect(context.interactive).toBe(false);
 	});
+
+	it("fails closed for an invalid explicit flag", async () => {
+		const cwd = await mkdtemp(join(tmpdir(), "perm-wire4-"));
+		await mkdir(join(cwd, ".git"), { recursive: true });
+		expect(buildPermissionContext(cwd, "manul", true).mode).toBe("manual");
+	});
 });

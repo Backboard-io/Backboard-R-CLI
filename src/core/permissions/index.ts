@@ -24,5 +24,6 @@ export function buildPermissionContext(
 		mode: parsePermissionMode(flagMode ?? settings.mode),
 		rules: parseRuleSet(settings),
 		interactive,
+		warnings: settings.warnings,
 	};
 }

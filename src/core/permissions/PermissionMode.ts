@@ -1,7 +1,7 @@
 /**
  * All permission modes. `auto` allows workspace edits, network reads, and any
  * command off the danger list (see dangerousCommands.ts); dangerous commands
- * and outward-facing tools (browser, computer, destructive MCP) still prompt.
+ * and outward-facing tools (browser, computer, mutating MCP) still prompt.
  */
 export const PERMISSION_MODES = [
 	"manual",
@@ -13,7 +13,7 @@ export const PERMISSION_MODES = [
 export type PermissionMode = (typeof PERMISSION_MODES)[number];
 
 /** Modes reachable by Shift+Tab. `bypass` is flag-only (`--permission-mode`). */
-const CYCLE_MODES = ["manual", "acceptEdits", "auto"] as const;
+const CYCLE_MODES = ["auto", "acceptEdits", "manual"] as const;
 
 const LABELS: Record<PermissionMode, string> = {
 	manual: "Manual",
@@ -31,7 +31,8 @@ export function isKnownPermissionMode(value: string | undefined): boolean {
 }
 
 export function parsePermissionMode(value: string | undefined): PermissionMode {
-	return isKnownPermissionMode(value) ? (value as PermissionMode) : "auto";
+	if (value === undefined) return "auto";
+	return isKnownPermissionMode(value) ? (value as PermissionMode) : "manual";
 }
 
 export function nextPermissionMode(mode: PermissionMode): PermissionMode {

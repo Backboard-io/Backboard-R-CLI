@@ -355,4 +355,40 @@ describe("decidePermission in auto mode", () => {
 			);
 		}
 	});
+
+	it("prompts for unannotated MCP tools in auto mode", () => {
+		const mcp = new McpToolAdapter({
+			registeredName: "mcp__mailer__send_email",
+			serverName: "mailer",
+			toolName: "send_email",
+			description: "Send email",
+			inputSchema: { type: "object" },
+			trustAnnotations: false,
+			timeoutMs: 1_000,
+			call: async () => ({ content: [] }),
+		});
+
+		expect(
+			decidePermission(mcp, {}, pctx({ mode: "auto" }), "/tmp").behavior,
+		).toBe("ask");
+	});
+
+	it("allows trusted read-only MCP tools in auto mode", () => {
+		const mcp = new McpToolAdapter({
+			registeredName: "mcp__docs__search",
+			serverName: "docs",
+			toolName: "search",
+			description: "Search docs",
+			inputSchema: { type: "object" },
+			annotations: { readOnlyHint: true },
+			trustAnnotations: true,
+			timeoutMs: 1_000,
+			call: async () => ({ content: [] }),
+		});
+
+		expect(decidePermission(mcp, {}, pctx({ mode: "auto" }), "/tmp")).toEqual({
+			behavior: "allow",
+			reason: "read-only tool",
+		});
+	});
 });

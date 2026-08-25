@@ -348,6 +348,7 @@ async function main(): Promise<void> {
 	const startupWarnings = [
 		...config.startupWarnings,
 		...hookConfig.warnings,
+		...(permissions.warnings ?? []),
 		...permissionWarnings,
 		...agentCatalog.warnings,
 		...renderWarnings,

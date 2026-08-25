@@ -203,6 +203,8 @@ for details and limitations.
 
 R-CLI starts in `auto` permission mode. Workspace edits, network reads, and
 commands not classified as risky run automatically; risky actions still ask.
+MCP tools still ask unless the user has explicitly trusted the server's
+read-only annotations.
 
 Press `Shift+Tab` to cycle interactive permission modes, or choose one at
 startup:
@@ -723,6 +725,8 @@ and untracked work.
 - Do not commit `.env`, API keys, MCP authorization headers, or hook secrets.
 - Review project `.backboard/mcp.json` and `.backboard/hooks.json` files before
   using an unfamiliar repository.
+- Review project `.backboard/settings.json`; it can change permission modes and
+  rules for the repository.
 - Use `manual` permission mode when opening an unfamiliar repository.
 - Use `bypass` only in isolated, disposable environments.
 - Report suspected vulnerabilities privately to the Backboard maintainers

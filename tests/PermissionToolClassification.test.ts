@@ -61,6 +61,11 @@ describe("discovery tools in auto mode", () => {
 		cwd: "/project",
 		interactive: true,
 	};
+	const headlessAuto = {
+		mode: "auto" as const,
+		cwd: "/project",
+		interactive: false,
+	};
 
 	it("allows MCP discovery before its own confirmation gate", () => {
 		const tool = new FindMcpTool(() => undefined);
@@ -68,9 +73,12 @@ describe("discovery tools in auto mode", () => {
 			"allow",
 		);
 		expect(tool.checkPermissions({ task: "docs" }, manual)).toBeUndefined();
+		expect(
+			tool.checkPermissions({ task: "docs" }, headlessAuto),
+		).toBeUndefined();
 	});
 
-	it("allows skill discovery before its own confirmation gate", () => {
+	it("keeps skill discovery gated because local activation has no confirmation", () => {
 		const tool = new FindSkillTool({
 			listLocalSkills: async () => [],
 			activateSkill: () => ({ selectedName: "", loadedNames: [] }),
@@ -79,10 +87,11 @@ describe("discovery tools in auto mode", () => {
 				throw new Error("not used");
 			},
 		});
-		expect(tool.checkPermissions({ task: "docs" }, auto)?.behavior).toBe(
-			"allow",
-		);
+		expect(tool.checkPermissions({ task: "docs" }, auto)).toBeUndefined();
 		expect(tool.checkPermissions({ task: "docs" }, manual)).toBeUndefined();
+		expect(
+			tool.checkPermissions({ task: "docs" }, headlessAuto),
+		).toBeUndefined();
 	});
 });
 

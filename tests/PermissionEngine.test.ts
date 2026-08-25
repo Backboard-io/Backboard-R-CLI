@@ -13,6 +13,7 @@ import { ok, type ToolResult } from "../src/core/tools/ToolResult.ts";
 import { ApplyPatchTool } from "../src/tools/ApplyPatchTool.tsx";
 import { EditTool } from "../src/tools/EditTool.tsx";
 import { ExecuteTool } from "../src/tools/ExecuteTool.tsx";
+import { McpToolAdapter } from "../src/tools/MCPToolAdapter.tsx";
 import { WriteTool } from "../src/tools/WriteTool.tsx";
 
 const schema = z.object({ command: z.string().optional() });
@@ -330,5 +331,28 @@ describe("decidePermission in auto mode", () => {
 			"/tmp",
 		);
 		expect(decision.behavior).toBe("ask");
+	});
+
+	it("deny and ask rules override MCP auto mode", () => {
+		const mcp = new McpToolAdapter({
+			registeredName: "mcp__docs__search",
+			serverName: "docs",
+			toolName: "search",
+			description: "Search docs",
+			inputSchema: { type: "object" },
+			trustAnnotations: false,
+			timeoutMs: 1_000,
+			call: async () => ({ content: [] }),
+		});
+
+		for (const behavior of ["deny", "ask"] as const) {
+			const context = pctx({
+				mode: "auto",
+				rules: parseRuleSet({ [behavior]: [mcp.agentName] }),
+			});
+			expect(decidePermission(mcp, {}, context, "/tmp").behavior).toBe(
+				behavior,
+			);
+		}
 	});
 });

@@ -1,7 +1,7 @@
 /**
  * All permission modes. `auto` allows workspace edits, network reads, and any
  * command off the danger list (see dangerousCommands.ts); dangerous commands
- * and outward-facing tools (browser, computer, mutating MCP) still prompt.
+ * and outward-facing tools (browser, computer, destructive MCP) still prompt.
  */
 export const PERMISSION_MODES = [
 	"manual",

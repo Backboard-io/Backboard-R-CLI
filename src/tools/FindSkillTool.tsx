@@ -1,4 +1,8 @@
 import { z } from "zod";
+import type {
+	PermissionCheckContext,
+	PermissionDecision,
+} from "../core/permissions/types.ts";
 import type { Skill } from "../core/skills/Skill.ts";
 import type { SkillsShListItem } from "../core/skills/skillsSh.ts";
 import { Tool } from "../core/tools/Tool.ts";
@@ -92,6 +96,16 @@ export class FindSkillTool extends Tool<Input, Output> {
 
 	override isConcurrencySafe(): boolean {
 		return false;
+	}
+
+	override checkPermissions(
+		_input: Input,
+		ctx: PermissionCheckContext,
+	): PermissionDecision | undefined {
+		if (ctx.mode === "auto") {
+			return { behavior: "allow", reason: "skill discovery (auto mode)" };
+		}
+		return undefined;
 	}
 
 	override summarizeInput(input: Input): string | undefined {

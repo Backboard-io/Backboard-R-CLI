@@ -4,6 +4,10 @@ import type {
 	McpRegistryItem,
 	McpServerRuntimeStatus,
 } from "../core/mcp/index.ts";
+import type {
+	PermissionCheckContext,
+	PermissionDecision,
+} from "../core/permissions/types.ts";
 import { Tool } from "../core/tools/Tool.ts";
 import type { ToolContext } from "../core/tools/ToolContext.ts";
 import { ok, type ToolResult } from "../core/tools/ToolResult.ts";
@@ -77,6 +81,16 @@ export class FindMcpTool extends Tool<Input, Output> {
 
 	override isConcurrencySafe(): boolean {
 		return false;
+	}
+
+	override checkPermissions(
+		_input: Input,
+		ctx: PermissionCheckContext,
+	): PermissionDecision | undefined {
+		if (ctx.mode === "auto") {
+			return { behavior: "allow", reason: "MCP discovery (auto mode)" };
+		}
+		return undefined;
 	}
 
 	override summarizeInput(input: Input): string | undefined {

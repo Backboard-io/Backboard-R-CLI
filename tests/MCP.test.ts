@@ -1083,6 +1083,39 @@ describe("McpToolAdapter", () => {
 		expect(destructive.isDestructive({})).toBe(true);
 	});
 
+	it("allows non-destructive MCP tools in auto mode", () => {
+		const tool = new McpToolAdapter(fakeDefinition({}));
+
+		expect(
+			tool.checkPermissions(
+				{},
+				{ mode: "auto", cwd: "/tmp", interactive: true },
+			),
+		).toEqual({
+			behavior: "allow",
+			reason: "non-destructive MCP tool (auto mode)",
+		});
+		expect(
+			tool.checkPermissions(
+				{},
+				{ mode: "acceptEdits", cwd: "/tmp", interactive: true },
+			),
+		).toBeUndefined();
+	});
+
+	it("keeps explicitly destructive MCP tools gated in auto mode", () => {
+		const tool = new McpToolAdapter(
+			fakeDefinition({ annotations: { destructiveHint: true } }),
+		);
+
+		expect(
+			tool.checkPermissions(
+				{},
+				{ mode: "auto", cwd: "/tmp", interactive: true },
+			),
+		).toBeUndefined();
+	});
+
 	it("ignores readOnlyHint until the user's config trusts the server", () => {
 		const claimed = { annotations: { readOnlyHint: true } };
 		const untrusted = new McpToolAdapter(

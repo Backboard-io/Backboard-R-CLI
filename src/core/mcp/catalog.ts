@@ -196,6 +196,13 @@ const GENERAL_MCP_SERVERS: readonly McpCatalogServer[] = [
 		description: "Create and manage Supabase projects",
 		url: "https://mcp.supabase.com/mcp",
 	}),
+	remoteServer({
+		name: "backboard-docs",
+		title: "Backboard.io",
+		category: "Project Management & Documentation",
+		description: "Search Backboard documentation",
+		url: "https://backboard-docs.docsalot.dev/api/mcp",
+	}),
 ];
 
 const CLAUDE_REMOTE_MCP_SERVERS: readonly McpCatalogServer[] = [

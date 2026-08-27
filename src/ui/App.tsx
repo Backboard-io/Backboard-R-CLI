@@ -1287,7 +1287,9 @@ export function App({
 			controller.setComputerUseEnabled(enabled);
 			if (opts?.silent) return;
 			agent.notice(
-				`Computer use ${enabled ? "enabled" : "disabled"} for this session.`,
+				enabled
+					? `Computer use enabled for this session. ${computerUseHint()}`
+					: "Computer use disabled for this session.",
 				enabled ? "info" : "warning",
 			);
 		},
@@ -2232,4 +2234,16 @@ function formatInlinePrompt(prompt: string): string {
 	return normalized.length > 100
 		? `${normalized.slice(0, 97).trimEnd()}...`
 		: normalized;
+}
+
+/** One-line setup reminder shown when computer use is switched on. */
+function computerUseHint(): string {
+	switch (process.platform) {
+		case "darwin":
+			return "The terminal needs Screen Recording and Accessibility permission; the first action compiles a small native helper (Xcode Command Line Tools).";
+		case "win32":
+			return "Actions run through a persistent PowerShell helper.";
+		default:
+			return "Local control is only supported on macOS and Windows.";
+	}
 }

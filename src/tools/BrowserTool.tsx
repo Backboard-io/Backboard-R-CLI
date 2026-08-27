@@ -124,7 +124,7 @@ const publicActionSchema = z.object({
 		.array(keyModifierSchema)
 		.describe("Optional modifiers for key actions when key is a string.")
 		.optional(),
-	durationMs: z.number().int().positive().optional(),
+	durationMs: z.number().int().min(1).optional(),
 	ms: z
 		.number()
 		.int()
@@ -197,10 +197,36 @@ export class BrowserTool extends Tool<Input, BrowserQueueResult> {
 		});
 		return ok(
 			result,
-			JSON.stringify(result),
+			JSON.stringify(hoistBrowserImage(result)),
 			browserResultTitle(input.actions, result),
 		);
 	}
+}
+
+/**
+ * Backboard's server lifts `__image_base64` into an image block only from
+ * the top level of a tool output, so the latest observation's image is moved
+ * there for the wire; earlier observations in the batch keep text only.
+ */
+export function hoistBrowserImage(result: BrowserQueueResult): object {
+	let image: { base64: string; mediaType: string } | null = null;
+	const results = result.results.map((entry) => {
+		if (!("__image_base64" in entry) || !entry.__image_base64) return entry;
+		const { __image_base64, __image_media_type, ...rest } = entry;
+		image = {
+			base64: __image_base64,
+			mediaType: __image_media_type ?? "image/png",
+		};
+		return rest;
+	});
+	if (!image) return result;
+	const { base64, mediaType } = image as { base64: string; mediaType: string };
+	return {
+		...result,
+		results,
+		__image_base64: base64,
+		__image_media_type: mediaType,
+	};
 }
 
 function browserResultTitle(

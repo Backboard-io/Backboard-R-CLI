@@ -15,7 +15,7 @@
 		"ep": "bun run scripts/export-prompts.ts",
 		"prepare": "git config core.hooksPath .githooks",
 		"precommit": "bun run validate",
-		"validate": "bun run lint && bun run typecheck && bun test",
+		"validate": "bun run lint && bun run typecheck && bun run typecheck:scripts && bun test",
 		"build": "bun run scripts/build.ts",
 		"build:release": "bun run scripts/build-release.ts",
 		"typecheck": "bunx tsc --noEmit",
@@ -23,7 +23,13 @@
 		"lint": "biome check .",
 		"lint:fix": "biome check --write .",
 		"format": "biome format --write .",
-		"format:check": "biome format ."
+		"format:check": "biome format .",
+		"typecheck:scripts": "bunx tsc --noEmit -p tsconfig.scripts.json",
+		"cua:smoke": "bun run scripts/cua-smoke.ts",
+		"cua:e2e": "BACKBOARD_CUA_E2E=1 bun test tests/MacPlatform.e2e.test.ts",
+		"cua:grounding": "bun run scripts/cua-eval/grounding.ts",
+		"cua:eval": "bun run scripts/cua-eval/run.ts",
+		"verify:providers": "bun run scripts/verify-tool-schemas.ts"
 	},
 	"dependencies": {
 		"@modelcontextprotocol/sdk": "^1.29.0",
@@ -42,6 +48,7 @@
 	},
 	"devDependencies": {
 		"@biomejs/biome": "^2.5.0",
+		"@daytona/sdk": "0.207.0",
 		"@types/bun": "^1.1.10",
 		"@types/qrcode": "^1.5.6",
 		"@types/react": "^19.2.0",

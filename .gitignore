@@ -8,3 +8,6 @@ node_modules/
 /skills/
 /prompt-dumps/
 *.bun-build
+
+# Local computer-use eval output
+scripts/cua-eval/results/

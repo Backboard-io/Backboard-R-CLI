@@ -5,13 +5,22 @@ import type {
 	ProviderEvent,
 	ProviderToolCall,
 } from "../../backboard/types.ts";
-import { unexpectedStreamEndMessage } from "../ByokError.ts";
+import {
+	providerErrorMessage,
+	unexpectedStreamEndMessage,
+} from "../ByokError.ts";
 import type {
 	ByokMessage,
 	ByokStreamRequest,
 	ProviderAdapter,
 } from "../ByokTypes.ts";
 import { getJson, postSseJson } from "../httpStream.ts";
+import {
+	imageDataUri,
+	planToolImages,
+	renderToolResult,
+	TOOL_IMAGE_NOTE,
+} from "../toolImages.ts";
 import {
 	OPENROUTER_API_BASE,
 	OPENROUTER_APP_TITLE,
@@ -46,6 +55,7 @@ interface PendingToolCall {
 
 interface OpenRouterCatalog {
 	models: ModelCatalogItem[];
+	imageInputModels: Set<string>;
 }
 
 interface CachedOpenRouterCatalog {
@@ -120,17 +130,26 @@ async function* streamOpenRouter(
 	request: ByokStreamRequest,
 	key: string,
 ): AsyncIterable<ProviderEvent> {
-	const modelMetadata: { value: ModelCatalogItem | null } = { value: null };
+	let catalog = cachedCatalogValue(key);
+	if (!catalog && requestContainsImages(request)) {
+		catalog = await waitForSignal(loadCatalog(key), request.signal);
+	}
+	const modelMetadata: { value: ModelCatalogItem | null } = {
+		value:
+			catalog?.models.find((candidate) => candidate.name === request.model) ??
+			null,
+	};
 	void loadCatalog(key)
-		.then((catalog) => {
+		.then((loaded) => {
 			modelMetadata.value =
-				catalog.models.find((candidate) => candidate.name === request.model) ??
+				loaded.models.find((candidate) => candidate.name === request.model) ??
 				null;
 		})
 		.catch(() => {});
+	const acceptsImages = catalog?.imageInputModels.has(request.model) === true;
 	const body: Record<string, unknown> = {
 		model: request.model,
-		messages: toOpenRouterMessages(request),
+		messages: toOpenRouterMessages(request, acceptsImages),
 		stream: true,
 		stream_options: { include_usage: true },
 	};
@@ -158,10 +177,12 @@ async function* streamOpenRouter(
 
 	for await (const chunk of postSseJson(sseRequest)) {
 		if (chunk.error) {
-			const error = chunk.error as { message?: string };
+			const retryable = isRetryableOpenRouterError(chunk.error);
 			yield {
 				kind: "failed",
-				error: error.message ?? "OpenRouter returned an error event",
+				error:
+					providerErrorMessage(chunk) ?? "OpenRouter returned an error event",
+				...(retryable ? { retryable: true } : {}),
 			};
 			return;
 		}
@@ -186,9 +207,12 @@ async function* streamOpenRouter(
 			| undefined;
 		if (!choice) continue;
 		if (choice.error) {
+			const retryable = isRetryableOpenRouterError(choice.error);
 			yield {
 				kind: "failed",
-				error: choice.error.message ?? "OpenRouter returned an error choice",
+				error:
+					providerErrorMessage(choice) ?? "OpenRouter returned an error choice",
+				...(retryable ? { retryable: true } : {}),
 			};
 			return;
 		}
@@ -310,6 +334,9 @@ async function loadCatalog(key: string): Promise<OpenRouterCatalog> {
 	cachedCatalog = {
 		credentialId,
 		expiresAt: 0,
+		...(cachedCatalog?.credentialId === credentialId && cachedCatalog.value
+			? { value: cachedCatalog.value }
+			: {}),
 		pending,
 	};
 	try {
@@ -323,9 +350,39 @@ async function loadCatalog(key: string): Promise<OpenRouterCatalog> {
 		}
 		return value;
 	} catch (error) {
-		if (cachedCatalog?.pending === pending) cachedCatalog = null;
+		if (cachedCatalog?.pending === pending) {
+			const stale = cachedCatalog.value;
+			if (stale !== undefined) {
+				cachedCatalog = {
+					credentialId,
+					expiresAt: Date.now() + OPENROUTER_CATALOG_TTL_MS,
+					value: stale,
+				};
+				return stale;
+			}
+			cachedCatalog = null;
+		}
 		throw error;
 	}
+}
+
+function requestContainsImages(request: ByokStreamRequest): boolean {
+	return (
+		request.messages.some(
+			(message) =>
+				message.role === "user" &&
+				message.attachments?.some((attachment) => attachment.base64) === true,
+		) || planToolImages(request.messages, 1).size > 0
+	);
+}
+
+function cachedCatalogValue(key: string): OpenRouterCatalog | null {
+	const credentialId = createHash("sha256").update(key.trim()).digest("hex");
+	return cachedCatalog?.credentialId === credentialId &&
+		cachedCatalog.value &&
+		cachedCatalog.expiresAt > Date.now()
+		? cachedCatalog.value
+		: null;
 }
 
 async function fetchCatalog(
@@ -339,12 +396,17 @@ async function fetchCatalog(
 		signal,
 	);
 	const models: ModelCatalogItem[] = [];
+	const imageInputModels = new Set<string>();
 	for (const model of response.data ?? []) {
 		if (!isOpenRouterChatModel(model)) continue;
 		const id = model.id as string;
 		const supportsThinking = supportsReasoningParameter(
 			model.supported_parameters,
 		);
+		const inputModalities = model.architecture?.input_modalities;
+		if (!inputModalities || inputModalities.includes("image")) {
+			imageInputModels.add(id);
+		}
 		models.push({
 			name: id,
 			provider: "openrouter",
@@ -358,7 +420,7 @@ async function fetchCatalog(
 			supports_thinking: supportsThinking,
 		});
 	}
-	return { models };
+	return { models, imageInputModels };
 }
 
 function positiveNumber(value: unknown): number | null {
@@ -428,11 +490,17 @@ function parseArguments(args: string): unknown {
 	}
 }
 
-function toOpenRouterMessages(request: ByokStreamRequest): unknown[] {
+export function toOpenRouterMessages(
+	request: ByokStreamRequest,
+	withImages = true,
+): unknown[] {
 	const out: unknown[] = [{ role: "system", content: request.systemPrompt }];
-	for (const message of request.messages) {
+	const imagePlan = withImages
+		? planToolImages(request.messages)
+		: new Set<string>();
+	for (const [messageIndex, message] of request.messages.entries()) {
 		if (message.role === "user") {
-			out.push({ role: "user", content: userContent(message) });
+			out.push({ role: "user", content: userContent(message, withImages) });
 			continue;
 		}
 		if (message.role === "assistant") {
@@ -455,16 +523,49 @@ function toOpenRouterMessages(request: ByokStreamRequest): unknown[] {
 			out.push(entry);
 			continue;
 		}
-		for (const result of message.results) {
+		// Chat tool messages are text-only, so images ride in a user message
+		// that follows the batch of results.
+		const imageParts: unknown[] = [];
+		for (const [resultIndex, result] of message.results.entries()) {
+			const rendered = renderToolResult(
+				result.output,
+				imagePlan.has(`${messageIndex}:${resultIndex}`),
+				undefined,
+				withImages ? "older screenshot" : "model does not accept images",
+			);
 			out.push({
 				role: "tool",
 				tool_call_id: result.id,
 				name: result.name,
-				content: result.output || "(no output)",
+				content: rendered.text || "(no output)",
+			});
+			for (const image of rendered.images) {
+				imageParts.push({
+					type: "image_url",
+					image_url: { url: imageDataUri(image) },
+				});
+			}
+		}
+		if (imageParts.length > 0) {
+			out.push({
+				role: "user",
+				content: [{ type: "text", text: TOOL_IMAGE_NOTE }, ...imageParts],
 			});
 		}
 	}
 	return out;
+}
+
+function isRetryableOpenRouterError(error: unknown): boolean {
+	if (typeof error !== "object" || error === null) return false;
+	const rawCode = (error as Record<string, unknown>).code;
+	const code =
+		typeof rawCode === "number"
+			? rawCode
+			: typeof rawCode === "string"
+				? Number(rawCode)
+				: Number.NaN;
+	return code === 502 || code === 503 || code === 504;
 }
 
 function readReasoningDetails(signature: string | undefined): unknown[] | null {
@@ -540,6 +641,7 @@ function abortReason(signal: AbortSignal): unknown {
 
 function userContent(
 	message: Extract<ByokMessage, { role: "user" }>,
+	withImages = true,
 ): string | unknown[] {
 	const attachments = message.attachments ?? [];
 	if (attachments.length === 0) return message.content;
@@ -547,12 +649,19 @@ function userContent(
 	const parts: unknown[] = [];
 	for (const attachment of attachments) {
 		if (attachment.base64) {
-			parts.push({
-				type: "image_url",
-				image_url: {
-					url: `data:${attachment.mediaType};base64,${attachment.base64}`,
-				},
-			});
+			parts.push(
+				withImages
+					? {
+							type: "image_url",
+							image_url: {
+								url: `data:${attachment.mediaType};base64,${attachment.base64}`,
+							},
+						}
+					: {
+							type: "text",
+							text: `Attached image ${attachment.path} omitted because this model does not accept images.`,
+						},
+			);
 		} else if (attachment.text) {
 			parts.push({
 				type: "text",

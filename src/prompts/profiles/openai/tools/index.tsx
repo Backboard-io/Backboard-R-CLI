@@ -5,6 +5,7 @@ import {
 	type PromptContext,
 	type PromptModule,
 } from "../../../PromptModule.ts";
+import { buildComputerPrompt as buildSharedComputerPrompt } from "../../../tools/computer.tsx";
 
 const read = definePrompt(buildReadPrompt(), buildReadPrompt);
 const write = definePrompt(buildWritePrompt(), buildWritePrompt);
@@ -309,25 +310,17 @@ Input shape:
 }
 
 function buildComputerPrompt(): string {
-	return `Control the local computer through screenshots and direct actions.
-
-Use this only when GUI interaction is required. Prefer element IDs from fresh screenshots; use coordinates only as a fallback.
-
-Safety:
-- Take or rely on a fresh screenshot before acting.
-- Inspect the result after state-changing actions.
-- Ask the user before submitting forms, purchasing, deleting, entering credentials, or changing sensitive settings.
-- Queue only the actions needed for the immediate step.
+	return `${buildSharedComputerPrompt()}
 
 ### Parameters
 
 | Name | Type | Required | Description |
 | --- | --- | --- | --- |
-| \`actions\` | \`array\` | yes | Queue of 1-20 computer actions. |
-| \`defaultDelayMs\` | \`number\` | no | Delay between actions. |
-| \`stopOnError\` | \`boolean\` | no | Stop after the first failed action. |
+| \`actions\` | \`array\` | yes | 1-25 actions run in order; stops at the first failure. Each has \`action\` plus its fields: \`target\` {elementId | x,y}, \`from\`/\`to\` (drag), \`button\`, \`count\`, \`modifiers\`, \`direction\`/\`amount\` (scroll), \`region\` (zoom), \`text\`, \`key\`, \`repeat\`, \`durationMs\`, \`appName\`. |
+| \`defaultDelayMs\` | \`number\` | no | Pause between actions. |
+| \`stopOnError\` | \`boolean\` | no | Stop at the first failed action (default true). |
 
-Actions: screenshot, click, type, key, wait, openApp.`.trim();
+Actions: screenshot, zoom, click, move, drag, scroll, type, key, holdKey, wait, openApp.`.trim();
 }
 
 function buildBrowserPrompt(): string {

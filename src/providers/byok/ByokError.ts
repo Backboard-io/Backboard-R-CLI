@@ -42,8 +42,32 @@ export function providerErrorMessage(body: unknown): string | null {
 	if (typeof error === "string" && error.trim()) return error.trim();
 	if (typeof error === "object" && error !== null) {
 		const message = (error as Record<string, unknown>).message;
-		if (typeof message === "string" && message.trim()) return message.trim();
+		// OpenRouter wraps upstream failures as "Provider returned error" and
+		// puts the vendor's actual message in metadata.raw.
+		const metadata = (error as Record<string, unknown>).metadata;
+		const raw =
+			typeof metadata === "object" && metadata !== null
+				? (metadata as Record<string, unknown>).raw
+				: undefined;
+		const detail =
+			typeof raw === "string" && raw.trim()
+				? (providerErrorMessage(parseMaybeJson(raw)) ?? raw.trim())
+				: null;
+		if (typeof message === "string" && message.trim()) {
+			return detail && detail !== message.trim()
+				? `${message.trim()}: ${detail}`
+				: message.trim();
+		}
+		if (detail) return detail;
 	}
 	const message = record.message;
 	return typeof message === "string" && message.trim() ? message.trim() : null;
+}
+
+function parseMaybeJson(value: string): unknown {
+	try {
+		return JSON.parse(value);
+	} catch {
+		return value;
+	}
 }

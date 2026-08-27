@@ -77,7 +77,7 @@ const schema = z.object({
 	timeout_ms: z
 		.number()
 		.int()
-		.positive()
+		.min(1)
 		.optional()
 		.describe(
 			"Optional wall-clock budget for this run. On expiry a worker moves to the background and keeps going; an rlm returns a partial-progress report.",

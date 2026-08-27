@@ -226,6 +226,29 @@ Project permission rules live in:
 Read the [permissions guide](https://docs.backboard.io/cli/permissions) before
 using R-CLI in automation or relaxing its defaults.
 
+## Computer use
+
+`/cua` lets the agent see and control the local desktop through the `Computer`
+tool. Each call runs a batch of actions (click, type, key, scroll, drag, zoom,
+openApp, …) and returns the screen once afterwards: a downscaled screenshot plus
+the frontmost window's interactive elements, so the model can click by element
+id instead of guessing coordinates.
+
+Requirements:
+
+- **macOS 14+**: grant your terminal *Screen Recording* and *Accessibility*
+  permission (System Settings → Privacy & Security). The first action compiles
+  a small native helper with the Xcode Command Line Tools (`xcode-select
+  --install`); it is cached under `~/.backboard/bin` and reused.
+- **Windows**: actions run through a persistent PowerShell helper; nothing to
+  install.
+- Linux desktops are supported through the eval harness only (Daytona).
+
+Screenshot-only batches are treated as read-only; anything that clicks or types
+asks for permission like any other mutating tool, and the prompt lists the
+batch. Screenshots are kept under `~/.backboard/screenshots/<session>` and
+pruned automatically.
+
 ## One-shot and JSON modes
 
 Run one prompt and exit:
@@ -596,6 +619,7 @@ bun run build
 ```sh
 bun run lint
 bun run typecheck
+bun run typecheck:scripts
 bun test
 ```
 
@@ -617,6 +641,24 @@ bun run prepare
 ```
 
 The hook runs `bun run precommit`, which runs the full validation suite.
+
+### Computer-use checks and evals
+
+Unit tests cover the tool contract with a fake platform. The real machine and
+the model are exercised by opt-in scripts:
+
+```sh
+bun run cua:e2e        # macOS: compiled helper, capture, accessibility, settle (read-only)
+bun run cua:smoke      # macOS/Windows: opens the text editor, types, verifies, closes
+bun run cua:grounding  # Tier 0: replays saved screenshots through the model; click-in-bounds
+bun run cua:eval       # Tier 1: real agent loop on programmatic tasks in Daytona XFCE sandboxes
+```
+
+`cua:grounding` needs `BACKBOARD_API_KEY`; `cua:eval` also needs
+`DAYTONA_API_KEY` (both are read from `.env` or `../cli-eval/.env`). Record new
+grounding fixtures from an app on your screen with
+`bun run scripts/cua-eval/capture-fixture.ts --open <App> --window --target <name>`.
+See `docs/cua-research.md` for the design, measurements, and the eval plan.
 
 ### Release builds
 
@@ -699,6 +741,14 @@ Headless runs cannot answer permission prompts. Add a narrowly scoped allow
 rule to `.backboard/settings.json`, or use `--permission-mode bypass` only in a
 disposable environment. See the
 [automation permissions guide](https://docs.backboard.io/cli/permissions#headless-and-automation).
+
+### Computer use cannot see or control the screen
+
+On macOS the tool reports `accessibilityTrusted: false` or a capture error when
+the terminal lacks *Accessibility* or *Screen Recording* permission; grant both
+and retry the action. A compile error mentions `swiftc`: install the Xcode
+Command Line Tools with `xcode-select --install`. Non-QWERTY layouts (Colemak,
+Dvorak, …) are handled — keys are resolved through the active layout.
 
 ### The agent changed something unexpectedly
 

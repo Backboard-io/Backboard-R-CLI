@@ -101,7 +101,11 @@ const TEST_DEFINITION: AgentDefinition = {
 	source: "built-in",
 };
 
-function runnerWith(client: BackboardClient, tools: Tool[]): SubAgentRunner {
+function runnerWith(
+	client: BackboardClient,
+	tools: Tool[],
+	maxToolRounds?: number,
+): SubAgentRunner {
 	return new SubAgentRunner({
 		client,
 		getModel: () => TEST_MODEL,
@@ -109,6 +113,7 @@ function runnerWith(client: BackboardClient, tools: Tool[]): SubAgentRunner {
 		memoryProfile: "code",
 		getThinking: async () => undefined,
 		toolFactory: () => tools,
+		...(maxToolRounds !== undefined ? { maxToolRounds } : {}),
 	});
 }
 
@@ -272,6 +277,27 @@ describe("SubAgentRunner", () => {
 		expect(result.status).toBe("failed");
 		expect(result.toolRounds).toBe(20);
 		expect(client.toolOutputRequests).toHaveLength(20);
+	});
+
+	it("allows callers to lower the tool round cap", async () => {
+		const client = new RepeatingToolCallClient();
+		const runner = runnerWith(
+			client,
+			[new TestTool({ name: "Read", readOnly: true })],
+			3,
+		);
+
+		const result = await runner.run({
+			prompt: "keep using tools",
+			depth: 1,
+			definition: TEST_DEFINITION,
+			parentCwd: process.cwd(),
+			parentSignal: new AbortController().signal,
+		});
+
+		expect(result.status).toBe("failed");
+		expect(result.toolRounds).toBe(3);
+		expect(client.toolOutputRequests).toHaveLength(3);
 	});
 
 	it("records worker child events when trace logging is configured", async () => {

@@ -13,6 +13,12 @@ import type {
 import { getJson, postSseJson } from "../httpStream.ts";
 import { thinkingEffort } from "../thinking.ts";
 import {
+	imageDataUri,
+	planToolImages,
+	renderToolResult,
+	TOOL_IMAGE_NOTE,
+} from "../toolImages.ts";
+import {
 	OPENAI_DISABLED_TOOL_REASONING_PATTERN,
 	OPENAI_NON_CHAT_MODEL_PATTERNS,
 } from "./OpenAIAdapter.constants.ts";
@@ -93,6 +99,15 @@ function isChatModel(id: string): boolean {
 	const normalized = id.toLowerCase();
 	return !OPENAI_NON_CHAT_MODEL_PATTERNS.some((pattern) =>
 		normalized.includes(pattern),
+	);
+}
+
+export function openAIModelAcceptsImages(model: string): boolean {
+	const normalized = model.startsWith("ft:")
+		? (model.split(":")[1] ?? model)
+		: model;
+	return !/^(?:gpt-3\.5(?:-|$)|gpt-4(?:-32k)?(?:$|-(?:0314|0613)$)|gpt-4-(?:0125|1106)-preview$|gpt-4-turbo-preview$|o1-(?:mini|preview)(?:-|$)|o3-mini(?:-|$))/i.test(
+		normalized,
 	);
 }
 
@@ -296,11 +311,18 @@ function parseArguments(args: string): unknown {
 	}
 }
 
-function toOpenAIMessages(request: ByokStreamRequest): unknown[] {
+export function toOpenAIMessages(request: ByokStreamRequest): unknown[] {
 	const out: unknown[] = [{ role: "system", content: request.systemPrompt }];
-	for (const message of request.messages) {
+	const acceptsImages = openAIModelAcceptsImages(request.model);
+	const imagePlan = acceptsImages
+		? planToolImages(request.messages)
+		: new Set<string>();
+	for (const [messageIndex, message] of request.messages.entries()) {
 		if (message.role === "user") {
-			out.push({ role: "user", content: userContent(message) });
+			out.push({
+				role: "user",
+				content: userContent(message, acceptsImages),
+			});
 			continue;
 		}
 		if (message.role === "assistant") {
@@ -322,11 +344,32 @@ function toOpenAIMessages(request: ByokStreamRequest): unknown[] {
 			continue;
 		}
 		// Each tool result is its own message, matching one prior tool_call id.
-		for (const result of message.results) {
+		// Chat tool messages are text-only, so images ride in a user message
+		// that follows the batch of results.
+		const imageParts: unknown[] = [];
+		for (const [resultIndex, result] of message.results.entries()) {
+			const rendered = renderToolResult(
+				result.output,
+				imagePlan.has(`${messageIndex}:${resultIndex}`),
+				undefined,
+				acceptsImages ? "older screenshot" : "model does not accept images",
+			);
 			out.push({
 				role: "tool",
 				tool_call_id: result.id,
-				content: result.output || "(no output)",
+				content: rendered.text || "(no output)",
+			});
+			for (const image of rendered.images) {
+				imageParts.push({
+					type: "image_url",
+					image_url: { url: imageDataUri(image) },
+				});
+			}
+		}
+		if (imageParts.length > 0) {
+			out.push({
+				role: "user",
+				content: [{ type: "text", text: TOOL_IMAGE_NOTE }, ...imageParts],
 			});
 		}
 	}
@@ -335,6 +378,7 @@ function toOpenAIMessages(request: ByokStreamRequest): unknown[] {
 
 function userContent(
 	message: Extract<ByokMessage, { role: "user" }>,
+	withImages = true,
 ): string | unknown[] {
 	const attachments = message.attachments ?? [];
 	if (attachments.length === 0) return message.content;
@@ -342,12 +386,19 @@ function userContent(
 	const parts: unknown[] = [];
 	for (const attachment of attachments) {
 		if (attachment.base64) {
-			parts.push({
-				type: "image_url",
-				image_url: {
-					url: `data:${attachment.mediaType};base64,${attachment.base64}`,
-				},
-			});
+			parts.push(
+				withImages
+					? {
+							type: "image_url",
+							image_url: {
+								url: `data:${attachment.mediaType};base64,${attachment.base64}`,
+							},
+						}
+					: {
+							type: "text",
+							text: `Attached image ${attachment.path} omitted because this model does not accept images.`,
+						},
+			);
 		} else if (attachment.text) {
 			parts.push({
 				type: "text",

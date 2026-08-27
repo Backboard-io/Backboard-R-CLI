@@ -232,7 +232,9 @@ export class SubAgentRunner {
 					thinkingResolver,
 					requestKind: "subagent",
 					maxToolRounds:
-						params.definition.maxRounds ?? MAX_SUBAGENT_TOOL_ROUNDS,
+						params.definition.maxRounds ??
+						this.deps.maxToolRounds ??
+						MAX_SUBAGENT_TOOL_ROUNDS,
 				});
 				const status = await loop.run(params.prompt.trim(), ctx);
 

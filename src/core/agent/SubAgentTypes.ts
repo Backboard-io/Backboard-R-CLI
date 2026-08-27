@@ -48,6 +48,7 @@ export interface SubAgentRunnerDeps {
 		signal: AbortSignal,
 	) => Promise<RuntimeThinkingResolver>;
 	toolFactory: SubAgentToolFactory;
+	maxToolRounds?: number;
 	isToolEnabled?: (name: string, model: ModelRef) => boolean;
 	hookController?: HookController;
 	lsp?: LspService;

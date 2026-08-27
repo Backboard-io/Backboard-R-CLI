@@ -1,0 +1,9 @@
+{
+	"extends": "./tsconfig.json",
+	"include": [
+		"src",
+		"scripts/cua-eval",
+		"scripts/cua-smoke.ts",
+		"scripts/verify-tool-schemas.ts"
+	]
+}

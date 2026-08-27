@@ -72,7 +72,9 @@ export class McpToolAdapter extends Tool<
 	}
 
 	override isDestructive(_input: Record<string, unknown>): boolean {
-		return this.definition.annotations?.destructiveHint === true;
+		if (!this.definition.trustAnnotations) return true;
+		if (this.claimsReadOnly()) return false;
+		return this.definition.annotations?.destructiveHint !== false;
 	}
 
 	async execute(

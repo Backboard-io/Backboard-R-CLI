@@ -93,7 +93,7 @@ export interface AppState {
 
 export function initialState(
 	model: string,
-	permissionMode: PermissionMode = "manual",
+	permissionMode: PermissionMode = "auto",
 ): AppState {
 	return {
 		status: "idle",

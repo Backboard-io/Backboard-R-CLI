@@ -13,7 +13,7 @@ export const PERMISSION_MODES = [
 export type PermissionMode = (typeof PERMISSION_MODES)[number];
 
 /** Modes reachable by Shift+Tab. `bypass` is flag-only (`--permission-mode`). */
-const CYCLE_MODES = ["manual", "acceptEdits", "auto"] as const;
+const CYCLE_MODES = ["auto", "acceptEdits", "manual"] as const;
 
 const LABELS: Record<PermissionMode, string> = {
 	manual: "Manual",
@@ -31,6 +31,7 @@ export function isKnownPermissionMode(value: string | undefined): boolean {
 }
 
 export function parsePermissionMode(value: string | undefined): PermissionMode {
+	if (value === undefined) return "auto";
 	return isKnownPermissionMode(value) ? (value as PermissionMode) : "manual";
 }
 

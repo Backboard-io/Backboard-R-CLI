@@ -12,6 +12,7 @@ import type { ToolContext } from "../src/core/tools/ToolContext.ts";
 import { ToolRegistry } from "../src/core/tools/ToolRegistry.ts";
 import { ok, type ToolResult } from "../src/core/tools/ToolResult.ts";
 import { ToolScheduler } from "../src/core/tools/ToolScheduler.ts";
+import { McpToolAdapter } from "../src/tools/MCPToolAdapter.tsx";
 
 const schema = z.object({ value: z.string().optional() });
 type Input = z.infer<typeof schema>;
@@ -52,7 +53,7 @@ function scheduler(tool: Tool): ToolScheduler {
 	return new ToolScheduler(registry, new EventBus());
 }
 
-async function runOne(tool: GatedTool, ctx: ToolContext) {
+async function runOne(tool: Tool, ctx: ToolContext) {
 	const sched = scheduler(tool);
 	return await sched.run(
 		[{ id: "call_1", name: tool.agentName, input: {} }],
@@ -101,5 +102,59 @@ describe("permission gate in the runner", () => {
 		ctx.permissions = undefined;
 		await runOne(tool, ctx);
 		expect(tool.ran).toBe(true);
+	});
+
+	it("does not execute unannotated MCP tools headlessly in auto mode", async () => {
+		let called = false;
+		const tool = new McpToolAdapter({
+			registeredName: "mcp__mailer__send_email",
+			serverName: "mailer",
+			toolName: "send_email",
+			description: "Send email",
+			inputSchema: { type: "object" },
+			trustAnnotations: false,
+			timeoutMs: 1_000,
+			call: async () => {
+				called = true;
+				return { content: [] };
+			},
+		});
+		const ctx = makeContext(
+			{ mode: "auto", rules: parseRuleSet({}), interactive: false },
+			ALLOW_ONCE,
+		);
+
+		const outputs = await runOne(tool, ctx);
+
+		expect(called).toBe(false);
+		expect(outputs[0]?.output).toContain("unavailable");
+		expect(outputs[0]?.metadata?.error).toBe(true);
+	});
+
+	it("executes trusted read-only MCP tools headlessly in auto mode", async () => {
+		let called = false;
+		const tool = new McpToolAdapter({
+			registeredName: "mcp__docs__search",
+			serverName: "docs",
+			toolName: "search",
+			description: "Search docs",
+			inputSchema: { type: "object" },
+			annotations: { readOnlyHint: true },
+			trustAnnotations: true,
+			timeoutMs: 1_000,
+			call: async () => {
+				called = true;
+				return { content: [] };
+			},
+		});
+		const ctx = makeContext(
+			{ mode: "auto", rules: parseRuleSet({}), interactive: false },
+			DENY,
+		);
+
+		const outputs = await runOne(tool, ctx);
+
+		expect(called).toBe(true);
+		expect(outputs[0]?.metadata?.error).toBe(false);
 	});
 });

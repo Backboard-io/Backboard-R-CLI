@@ -3,8 +3,8 @@ import { initialState } from "../src/state/AppState.ts";
 import { reduce } from "../src/state/Store.ts";
 
 describe("permission mode in app state", () => {
-	it("defaults to manual", () => {
-		expect(initialState("model-x").permissionMode).toBe("manual");
+	it("defaults to auto", () => {
+		expect(initialState("model-x").permissionMode).toBe("auto");
 	});
 
 	it("accepts an initial mode", () => {

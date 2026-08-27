@@ -17,11 +17,11 @@ describe("PermissionMode", () => {
 		]);
 	});
 
-	it("parses valid modes and defaults to manual", () => {
+	it("parses valid modes and defaults to auto", () => {
 		expect(parsePermissionMode("bypass")).toBe("bypass");
 		expect(parsePermissionMode("acceptEdits")).toBe("acceptEdits");
 		expect(parsePermissionMode("nonsense")).toBe("manual");
-		expect(parsePermissionMode(undefined)).toBe("manual");
+		expect(parsePermissionMode(undefined)).toBe("auto");
 	});
 
 	it("recognizes known modes (for flag validation)", () => {
@@ -30,12 +30,12 @@ describe("PermissionMode", () => {
 		expect(isKnownPermissionMode(undefined)).toBe(false);
 	});
 
-	it("cycles manual → acceptEdits → auto → manual, excluding bypass", () => {
-		expect(nextPermissionMode("manual")).toBe("acceptEdits");
-		expect(nextPermissionMode("acceptEdits")).toBe("auto");
-		expect(nextPermissionMode("auto")).toBe("manual");
+	it("cycles auto → acceptEdits → manual → auto, excluding bypass", () => {
+		expect(nextPermissionMode("auto")).toBe("acceptEdits");
+		expect(nextPermissionMode("acceptEdits")).toBe("manual");
+		expect(nextPermissionMode("manual")).toBe("auto");
 		// bypass is flag-only; cycling out of it exits to the top.
-		expect(nextPermissionMode("bypass")).toBe("manual");
+		expect(nextPermissionMode("bypass")).toBe("auto");
 	});
 
 	it("labels modes for the status bar", () => {

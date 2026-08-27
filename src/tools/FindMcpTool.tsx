@@ -4,6 +4,10 @@ import type {
 	McpRegistryItem,
 	McpServerRuntimeStatus,
 } from "../core/mcp/index.ts";
+import type {
+	PermissionCheckContext,
+	PermissionDecision,
+} from "../core/permissions/types.ts";
 import { Tool } from "../core/tools/Tool.ts";
 import type { ToolContext } from "../core/tools/ToolContext.ts";
 import { ok, type ToolResult } from "../core/tools/ToolResult.ts";
@@ -77,6 +81,16 @@ export class FindMcpTool extends Tool<Input, Output> {
 
 	override isConcurrencySafe(): boolean {
 		return false;
+	}
+
+	override checkPermissions(
+		_input: Input,
+		ctx: PermissionCheckContext,
+	): PermissionDecision | undefined {
+		if (ctx.mode === "auto" && ctx.interactive) {
+			return { behavior: "allow", reason: "MCP discovery (auto mode)" };
+		}
+		return undefined;
 	}
 
 	override summarizeInput(input: Input): string | undefined {
@@ -196,10 +210,14 @@ export class FindMcpTool extends Tool<Input, Output> {
 	): Promise<ToolResult<Output>> {
 		// Adding a server needs a human confirm; a sub-agent can't prompt, so
 		// surface the candidate instead of throwing on askUser.
-		if ((ctx.agentDepth ?? 0) > 0) {
+		if ((ctx.agentDepth ?? 0) > 0 || ctx.permissions?.interactive === false) {
+			const reason =
+				(ctx.agentDepth ?? 0) > 0
+					? "a sub-agent cannot prompt"
+					: "this run is non-interactive";
 			return ok(
 				{ task: input.task, candidates: [] },
-				`Found the "${item.title}" MCP server, but adding it must be confirmed by the user and a sub-agent cannot prompt. Ask the main agent to run find_mcp for this task.`,
+				`Found the "${item.title}" MCP server, but adding it must be confirmed by the user and ${reason}. Run find_mcp in an interactive main-agent session for this task.`,
 				"Confirmation needed",
 			);
 		}

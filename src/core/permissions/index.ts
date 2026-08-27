@@ -13,7 +13,7 @@ export {
 } from "./PermissionMode.ts";
 export type { PermissionContext } from "./types.ts";
 
-/** Flag > settings mode > "manual". Rules come from .backboard/settings.json. */
+/** Flag > settings mode > "auto". Rules come from .backboard/settings.json. */
 export function buildPermissionContext(
 	cwd: string,
 	flagMode: string | undefined,
@@ -24,5 +24,6 @@ export function buildPermissionContext(
 		mode: parsePermissionMode(flagMode ?? settings.mode),
 		rules: parseRuleSet(settings),
 		interactive,
+		warnings: settings.warnings,
 	};
 }

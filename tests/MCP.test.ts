@@ -1079,8 +1079,46 @@ describe("McpToolAdapter", () => {
 
 		expect(unannotated.isReadOnly({})).toBe(false);
 		expect(unannotated.isConcurrencySafe({})).toBe(false);
+		expect(unannotated.isDestructive({})).toBe(true);
 		expect(destructive.isReadOnly({})).toBe(false);
 		expect(destructive.isDestructive({})).toBe(true);
+	});
+
+	it("does not auto-allow MCP tools from untrusted annotations", () => {
+		const tools = [
+			new McpToolAdapter(fakeDefinition({})),
+			new McpToolAdapter(
+				fakeDefinition({
+					annotations: { destructiveHint: false },
+					trustAnnotations: false,
+				}),
+			),
+		];
+
+		for (const tool of tools) {
+			expect(
+				tool.checkPermissions(
+					{},
+					{ mode: "auto", cwd: "/tmp", interactive: true },
+				),
+			).toBeUndefined();
+			expect(tool.isDestructive({})).toBe(true);
+		}
+	});
+
+	it("applies MCP annotation defaults only after trust", () => {
+		const additive = new McpToolAdapter(
+			fakeDefinition({
+				annotations: { destructiveHint: false },
+				trustAnnotations: true,
+			}),
+		);
+		const omitted = new McpToolAdapter(
+			fakeDefinition({ trustAnnotations: true }),
+		);
+
+		expect(additive.isDestructive({})).toBe(false);
+		expect(omitted.isDestructive({})).toBe(true);
 	});
 
 	it("ignores readOnlyHint until the user's config trusts the server", () => {

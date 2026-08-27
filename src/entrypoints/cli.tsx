@@ -113,7 +113,7 @@ Options:
   --profile <name>           Profile to load (default: coding)
   --cwd <path>               Working directory
   --print <prompt>           Run a single prompt non-interactively
-  --permission-mode <mode>   manual | acceptEdits | auto (prompt only for risky) | bypass (default: manual)
+  --permission-mode <mode>   manual | acceptEdits | auto (prompt only for risky) | bypass (default: auto)
   --lsp                      Enable language-server diagnostics for this run
   --fresh                    Create a new Backboard assistant/thread for this run (isolated)
   --resume <id>              Resume a Backboard or local BYOK session
@@ -348,6 +348,7 @@ async function main(): Promise<void> {
 	const startupWarnings = [
 		...config.startupWarnings,
 		...hookConfig.warnings,
+		...(permissions.warnings ?? []),
 		...permissionWarnings,
 		...agentCatalog.warnings,
 		...renderWarnings,

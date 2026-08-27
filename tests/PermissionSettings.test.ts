@@ -55,6 +55,18 @@ describe("permission settings", () => {
 		});
 	});
 
+	it("fails closed and warns for an invalid mode", async () => {
+		const cwd = await tempProject();
+		await mkdir(join(cwd, ".backboard"), { recursive: true });
+		await writeFile(
+			join(cwd, ".backboard", "settings.json"),
+			JSON.stringify({ permissions: { mode: "manul" } }),
+		);
+		const settings = loadPermissionSettings(cwd);
+		expect(settings.mode).toBe("manual");
+		expect(settings.warnings?.join("\n")).toContain("using manual mode");
+	});
+
 	it("appendAllowRule creates the file and preserves other keys", async () => {
 		const cwd = await tempProject();
 		await mkdir(join(cwd, ".backboard"), { recursive: true });

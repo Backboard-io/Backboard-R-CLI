@@ -14,6 +14,7 @@ export interface PermissionSettings {
 	allow: string[];
 	deny: string[];
 	ask: string[];
+	warnings?: string[];
 }
 
 function settingsPath(cwd: string): string {
@@ -51,11 +52,18 @@ export function loadPermissionSettings(cwd: string): PermissionSettings {
 		deny: stringArray(record.deny),
 		ask: stringArray(record.ask),
 	};
-	if (
-		typeof record.mode === "string" &&
-		(PERMISSION_MODES as readonly string[]).includes(record.mode)
-	) {
-		settings.mode = parsePermissionMode(record.mode);
+	if (record.mode !== undefined) {
+		if (
+			typeof record.mode === "string" &&
+			(PERMISSION_MODES as readonly string[]).includes(record.mode)
+		) {
+			settings.mode = parsePermissionMode(record.mode);
+		} else {
+			settings.mode = "manual";
+			settings.warnings = [
+				`Unknown permissions.mode in ${settingsPath(cwd)}; using manual mode. Valid: ${PERMISSION_MODES.join(", ")}.`,
+			];
+		}
 	}
 	return settings;
 }

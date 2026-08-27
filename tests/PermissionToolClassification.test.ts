@@ -8,6 +8,8 @@ import {
 } from "../src/core/permissions/settings.ts";
 import { AskUserTool } from "../src/tools/AskUserTool.tsx";
 import { FetchUrlTool } from "../src/tools/FetchUrlTool.tsx";
+import { FindMcpTool } from "../src/tools/FindMcpTool.tsx";
+import { FindSkillTool } from "../src/tools/FindSkillTool.tsx";
 import { TodoWriteTool } from "../src/tools/TodoWriteTool.tsx";
 import { WebSearchTool } from "../src/tools/WebSearchTool.tsx";
 
@@ -49,6 +51,47 @@ describe("internal tools never gate on permission", () => {
 	it("AskUserTool.checkPermissions allows", () => {
 		const decision = new AskUserTool().checkPermissions();
 		expect(decision?.behavior).toBe("allow");
+	});
+});
+
+describe("discovery tools in auto mode", () => {
+	const auto = { mode: "auto" as const, cwd: "/project", interactive: true };
+	const manual = {
+		mode: "manual" as const,
+		cwd: "/project",
+		interactive: true,
+	};
+	const headlessAuto = {
+		mode: "auto" as const,
+		cwd: "/project",
+		interactive: false,
+	};
+
+	it("allows MCP discovery before its own confirmation gate", () => {
+		const tool = new FindMcpTool(() => undefined);
+		expect(tool.checkPermissions({ task: "docs" }, auto)?.behavior).toBe(
+			"allow",
+		);
+		expect(tool.checkPermissions({ task: "docs" }, manual)).toBeUndefined();
+		expect(
+			tool.checkPermissions({ task: "docs" }, headlessAuto),
+		).toBeUndefined();
+	});
+
+	it("keeps skill discovery gated because local activation has no confirmation", () => {
+		const tool = new FindSkillTool({
+			listLocalSkills: async () => [],
+			activateSkill: () => ({ selectedName: "", loadedNames: [] }),
+			listRemoteSkills: async () => [],
+			installRemoteSkill: async () => {
+				throw new Error("not used");
+			},
+		});
+		expect(tool.checkPermissions({ task: "docs" }, auto)).toBeUndefined();
+		expect(tool.checkPermissions({ task: "docs" }, manual)).toBeUndefined();
+		expect(
+			tool.checkPermissions({ task: "docs" }, headlessAuto),
+		).toBeUndefined();
 	});
 });
 

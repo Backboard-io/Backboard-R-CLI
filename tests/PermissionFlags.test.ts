@@ -18,7 +18,7 @@ describe("--permission-mode flag", () => {
 });
 
 describe("buildPermissionContext", () => {
-	it("flag beats settings mode; default is manual", async () => {
+	it("flag beats settings mode; default is auto", async () => {
 		const cwd = await mkdtemp(join(tmpdir(), "perm-wire-"));
 		await mkdir(join(cwd, ".git"), { recursive: true });
 		await mkdir(join(cwd, ".backboard"), { recursive: true });
@@ -34,7 +34,7 @@ describe("buildPermissionContext", () => {
 		);
 		const fresh = await mkdtemp(join(tmpdir(), "perm-wire2-"));
 		await mkdir(join(fresh, ".git"), { recursive: true });
-		expect(buildPermissionContext(fresh, undefined, true).mode).toBe("manual");
+		expect(buildPermissionContext(fresh, undefined, true).mode).toBe("auto");
 	});
 
 	it("loads rules from settings and carries interactivity", async () => {
@@ -48,5 +48,11 @@ describe("buildPermissionContext", () => {
 		const context = buildPermissionContext(cwd, undefined, false);
 		expect(context.rules.allow).toHaveLength(1);
 		expect(context.interactive).toBe(false);
+	});
+
+	it("fails closed for an invalid explicit flag", async () => {
+		const cwd = await mkdtemp(join(tmpdir(), "perm-wire4-"));
+		await mkdir(join(cwd, ".git"), { recursive: true });
+		expect(buildPermissionContext(cwd, "manul", true).mode).toBe("manual");
 	});
 });

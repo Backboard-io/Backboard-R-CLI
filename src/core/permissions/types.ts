@@ -27,6 +27,7 @@ export interface PermissionContext {
 	rules: RuleSet;
 	/** False in headless mode and sub-agents: an `ask` auto-denies unless `escalate` yields a prompt. */
 	interactive: boolean;
+	warnings?: string[];
 	escalate?: () => AskUserFn | null;
 	promptHost?: PermissionContext;
 }

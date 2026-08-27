@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { EventBus } from "../src/core/bus/EventBus.ts";
+import { parseRuleSet } from "../src/core/permissions/PermissionRules.ts";
 import type { Skill } from "../src/core/skills/Skill.ts";
 import type { SkillsShListItem } from "../src/core/skills/skillsSh.ts";
 import type { ToolContext } from "../src/core/tools/ToolContext.ts";
@@ -65,14 +66,22 @@ class FakeSkills implements SkillActivator {
 	}
 }
 
-function ctx(answer = "Download", depth = 0): ToolContext {
+function ctx(answer = "Download", depth = 0, interactive = true): ToolContext {
 	return {
 		sessionId: "t",
 		cwd: "/tmp",
 		bus: new EventBus(),
 		signal: new AbortController().signal,
-		askUser: async () => answer,
+		askUser: async () => {
+			if (!interactive) throw new Error("unexpected prompt");
+			return answer;
+		},
 		agentDepth: depth,
+		permissions: {
+			mode: "auto",
+			rules: parseRuleSet({}),
+			interactive,
+		},
 	};
 }
 
@@ -187,5 +196,19 @@ describe("FindSkillTool", () => {
 		);
 		expect(fake.installed).toEqual([]);
 		expect(res.forLLM).toContain("sub-agent cannot prompt");
+	});
+
+	it("never prompts or downloads in a non-interactive run", async () => {
+		const fake = new FakeSkills(
+			[skill("commit", "git commit message")],
+			[remote("acme/pdf-tools", "pdf-tools", "2K")],
+		);
+		const tool = new FindSkillTool(fake);
+		const res = await tool.execute(
+			{ task: "pdf-tools please" },
+			ctx("Download", 0, false),
+		);
+		expect(fake.installed).toEqual([]);
+		expect(res.forLLM).toContain("non-interactive");
 	});
 });

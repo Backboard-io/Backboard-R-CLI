@@ -5,6 +5,7 @@ import type {
 	McpRegistryItem,
 	McpServerRuntimeStatus,
 } from "../src/core/mcp/index.ts";
+import { parseRuleSet } from "../src/core/permissions/PermissionRules.ts";
 import type { ToolContext } from "../src/core/tools/ToolContext.ts";
 import {
 	FindMcpTool,
@@ -55,14 +56,22 @@ class FakeMcp implements McpRegistrar {
 	}
 }
 
-function ctx(answer = "Add", depth = 0): ToolContext {
+function ctx(answer = "Add", depth = 0, interactive = true): ToolContext {
 	return {
 		sessionId: "t",
 		cwd: "/tmp",
 		bus: new EventBus(),
 		signal: new AbortController().signal,
-		askUser: async () => answer,
+		askUser: async () => {
+			if (!interactive) throw new Error("unexpected prompt");
+			return answer;
+		},
 		agentDepth: depth,
+		permissions: {
+			mode: "auto",
+			rules: parseRuleSet({}),
+			interactive,
+		},
 	};
 }
 
@@ -165,5 +174,18 @@ describe("FindMcpTool", () => {
 		);
 		expect(fake.added).toEqual([]);
 		expect(res.forLLM).toContain("sub-agent cannot prompt");
+	});
+
+	it("never prompts or adds in a non-interactive run", async () => {
+		const fake = new FakeMcp([
+			server("postgres", "Postgres", "Query a Postgres database"),
+		]);
+		const tool = new FindMcpTool(() => fake);
+		const res = await tool.execute(
+			{ task: "query a postgres database" },
+			ctx("Add", 0, false),
+		);
+		expect(fake.added).toEqual([]);
+		expect(res.forLLM).toContain("non-interactive");
 	});
 });

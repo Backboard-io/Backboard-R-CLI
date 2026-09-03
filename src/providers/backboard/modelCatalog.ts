@@ -26,12 +26,13 @@ export function normalizeModel(model: ModelCatalogItem): ModelInfo | null {
 	if (!provider || !name || !isSelectableProvider(provider)) return null;
 
 	const ref = { provider, model: name };
+	const displayName = model.display_name?.trim();
 	const releaseTimestamp = timestamp(model.last_updated);
 	return {
 		id: formatModel(ref),
 		provider,
 		model: name,
-		label: formatModel(ref),
+		label: displayName ? `${provider}/${displayName}` : formatModel(ref),
 		...(typeof model.max_output_tokens === "number" ||
 		model.max_output_tokens === null
 			? { max_output_tokens: model.max_output_tokens }
@@ -66,8 +67,8 @@ function dedupe(models: ModelInfo[]): ModelInfo[] {
 	const seen = new Set<string>();
 	const out: ModelInfo[] = [];
 	for (const model of models) {
-		if (seen.has(model.label)) continue;
-		seen.add(model.label);
+		if (seen.has(model.id)) continue;
+		seen.add(model.id);
 		out.push(model);
 	}
 	return out;

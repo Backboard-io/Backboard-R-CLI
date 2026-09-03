@@ -1,5 +1,6 @@
 import type { JsonObject } from "../utils/JsonTypes.ts";
 import type { MemoryMode, MemoryProfile, ThinkingIntent } from "./defaults.ts";
+import type { CustomProviderDefinition } from "./providers.ts";
 
 export interface BackboardConfigFile {
 	apiKey?: string;
@@ -13,6 +14,8 @@ export interface BackboardConfigFile {
 	memoryProfile?: MemoryProfile;
 	notify?: boolean;
 	verbose?: boolean;
+	/** User-defined HTTP model providers. Secrets remain in keys.json. */
+	providers?: CustomProviderDefinition[];
 	/** Expert mode: implementation runs on `model`, planning stays on `/model`. */
 	expert?: ExpertConfig;
 }

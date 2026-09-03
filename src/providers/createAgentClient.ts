@@ -28,6 +28,7 @@ export function createAgentClient(
 		(provider) => providerKeyResolver(config.auth)(provider),
 		serverLog,
 		new ByokConversationStore(config.cwd),
+		() => config.providerRegistry,
 	);
 
 	return new ClientRouter({
@@ -36,5 +37,8 @@ export function createAgentClient(
 		getModel: () => config.model,
 		hasBackboardAuth: () => config.hasBackboardAuth,
 		hasKeyFor: (provider) => config.hasProviderKeyFor(provider),
+		hasProvider: (provider) => config.providerRegistry.get(provider) !== null,
+		hasCustomProvider: (provider) =>
+			config.providerRegistry.definition(provider) !== null,
 	});
 }

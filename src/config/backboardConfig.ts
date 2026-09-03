@@ -14,6 +14,7 @@ import {
 	parseMemoryProfile,
 	type ThinkingLevel,
 } from "./defaults.ts";
+import { parseCustomProviders } from "./providers.ts";
 
 export type { BackboardConfigFile } from "./BackboardConfigTypes.ts";
 
@@ -50,6 +51,7 @@ export function readBackboardConfig(
 			memoryProfile: readMemoryProfileConfig(config),
 			notify: typeof config.notify === "boolean" ? config.notify : undefined,
 			verbose: typeof config.verbose === "boolean" ? config.verbose : undefined,
+			providers: parseCustomProviders(config.providers),
 			expert: readExpertConfig(config),
 		};
 	} catch (err) {
@@ -218,4 +220,17 @@ export async function deleteBackboardConfig(
 		}
 		throw new Error(`Failed to delete ${file}: ${errorMessage(err)}`);
 	}
+}
+
+/** Removes only the Backboard credential while preserving local preferences/providers. */
+export async function clearBackboardCredential(
+	homeDir = os.homedir(),
+): Promise<{ path: string; removed: boolean }> {
+	const existing = readBackboardConfig(homeDir);
+	if (!existing.apiKey) {
+		return { path: backboardConfigPath(homeDir), removed: false };
+	}
+	const { apiKey: _removed, ...rest } = existing;
+	await saveBackboardConfig(rest, homeDir);
+	return { path: backboardConfigPath(homeDir), removed: true };
 }

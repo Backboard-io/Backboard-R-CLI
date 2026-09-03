@@ -1,3 +1,7 @@
+import {
+	type CustomModelDefinition,
+	joinProviderUrl,
+} from "../../../config/providers.ts";
 import { contextWindowFor } from "../../../core/context/ContextWindow.ts";
 import type {
 	ModelCatalogItem,
@@ -11,6 +15,7 @@ import type {
 	ProviderAdapter,
 } from "../ByokTypes.ts";
 import { getJson, postSseJson } from "../httpStream.ts";
+import { compatibleOpenAITools } from "../openAIToolSchemas.ts";
 import { thinkingEffort } from "../thinking.ts";
 import {
 	imageDataUri,
@@ -23,10 +28,9 @@ import {
 	OPENAI_NON_CHAT_MODEL_PATTERNS,
 } from "./OpenAIAdapter.constants.ts";
 
-const API_BASE = "https://api.openai.com/v1";
-
 interface OpenAIModelsResponse {
-	data?: Array<{ id?: string; created?: number }>;
+	data?: Array<{ id?: string; name?: string; created?: number }>;
+	models?: Array<{ id?: string; name?: string; created?: number }>;
 }
 
 /** A tool call assembled across `delta.tool_calls` chunks, keyed by index. */
@@ -35,67 +39,169 @@ interface PendingToolCall {
 	name: string;
 	args: string;
 	announced: boolean;
+	signature?: string;
 }
 
-export const openaiAdapter: ProviderAdapter = {
+export interface OpenAIChatAdapterOptions {
+	id: string;
+	label: string;
+	baseUrl: string;
+	consoleUrl?: string;
+	keyHint?: string;
+	requiresKey?: boolean;
+	headers?: Record<string, string>;
+	extraArgs?: Record<string, unknown>;
+	modelsPath?: string;
+	discoverModels?: boolean;
+	models?: readonly CustomModelDefinition[];
+}
+
+const OPENAI_OPTIONS: OpenAIChatAdapterOptions = {
 	id: "openai",
 	label: "OpenAI",
+	baseUrl: "https://api.openai.com/v1",
 	consoleUrl: "https://platform.openai.com/api-keys",
 	keyHint: "sk-...",
-
-	looksLikeKey(key) {
-		return /^sk-[\w-]{20,}$/.test(key.trim());
-	},
-
-	async validateKey(key, signal) {
-		await getJson<OpenAIModelsResponse>(
-			`${API_BASE}/models`,
-			headers(key),
-			"openai",
-			signal,
-		);
-	},
-
-	async listModels(key, signal) {
-		const response = await getJson<OpenAIModelsResponse>(
-			`${API_BASE}/models`,
-			headers(key),
-			"openai",
-			signal,
-		);
-		const models: ModelCatalogItem[] = [];
-		for (const model of response.data ?? []) {
-			if (!model.id || !isChatModel(model.id)) continue;
-			models.push({
-				name: model.id,
-				provider: "openai",
-				model_type: "llm",
-				// The models list reports epoch seconds; the catalog sorter wants ms.
-				last_updated:
-					typeof model.created === "number" ? model.created * 1000 : null,
-				context_limit: contextWindowFor({
-					provider: "openai",
-					model: model.id,
-				}),
-			});
-		}
-		return models;
-	},
-
-	supportsThinking() {
-		return true;
-	},
-
-	stream(request, key) {
-		return streamOpenAI(request, key);
-	},
+	requiresKey: true,
 };
 
-function headers(key: string): Record<string, string> {
-	return { Authorization: `Bearer ${key.trim()}` };
+export const openaiAdapter: ProviderAdapter =
+	createOpenAIChatAdapter(OPENAI_OPTIONS);
+
+export function createOpenAIChatAdapter(
+	options: OpenAIChatAdapterOptions,
+): ProviderAdapter {
+	return {
+		id: options.id,
+		label: options.label,
+		consoleUrl: options.consoleUrl ?? options.baseUrl,
+		keyHint: options.keyHint ?? "API key (optional for keyless endpoints)",
+		requiresKey: options.requiresKey ?? true,
+
+		looksLikeKey(key) {
+			return options.id === "openai"
+				? /^sk-[\w-]{20,}$/.test(key.trim())
+				: Boolean(key.trim()) || options.requiresKey === false;
+		},
+
+		async validateKey(key, signal) {
+			if (options.discoverModels === false) return;
+			await getJson<OpenAIModelsResponse>(
+				modelsUrl(options),
+				requestHeaders(key, options),
+				options.id,
+				signal,
+			);
+		},
+
+		async listModels(key, signal) {
+			const response =
+				options.discoverModels === false
+					? { data: [] }
+					: await getJson<OpenAIModelsResponse>(
+							modelsUrl(options),
+							requestHeaders(key, options),
+							options.id,
+							signal,
+						);
+			const models = new Map<string, ModelCatalogItem>();
+			for (const model of response.data ?? response.models ?? []) {
+				const id = model.id ?? model.name;
+				if (!id || !isOpenAIChatModel(id)) continue;
+				models.set(id.toLowerCase(), {
+					name: id,
+					provider: options.id,
+					model_type: "llm",
+					...(options.id === "openai"
+						? {}
+						: {
+								supports_thinking: true,
+								thinking_controls: effortThinkingControls(),
+							}),
+					// The models list reports epoch seconds; the catalog sorter wants ms.
+					last_updated:
+						typeof model.created === "number" ? model.created * 1000 : null,
+					context_limit: contextWindowFor({
+						provider: options.id,
+						model: id,
+					}),
+				});
+			}
+			for (const model of options.models ?? []) {
+				if (model.enabled === false) {
+					models.delete(model.id.toLowerCase());
+					continue;
+				}
+				models.set(model.id.toLowerCase(), configuredModel(options.id, model));
+			}
+			return [...models.values()];
+		},
+
+		supportsThinking(model) {
+			const configured = options.models?.find((entry) => entry.id === model);
+			return configured?.supportsThinking ?? true;
+		},
+
+		thinkingControls(model) {
+			const configured = options.models?.find((entry) => entry.id === model);
+			return configured?.supportsThinking === false
+				? undefined
+				: effortThinkingControls();
+		},
+
+		stream(request, key) {
+			return streamOpenAI(request, key, options);
+		},
+	};
 }
 
-function isChatModel(id: string): boolean {
+function requestHeaders(
+	key: string,
+	options: OpenAIChatAdapterOptions,
+): Record<string, string> {
+	return {
+		...(key.trim() ? { Authorization: `Bearer ${key.trim()}` } : {}),
+		...options.headers,
+	};
+}
+
+function modelsUrl(options: OpenAIChatAdapterOptions): string {
+	return joinProviderUrl(options.baseUrl, options.modelsPath ?? "models");
+}
+
+function configuredModel(
+	provider: string,
+	model: CustomModelDefinition,
+): ModelCatalogItem {
+	return {
+		name: model.id,
+		provider,
+		model_type: "llm",
+		...(model.name ? { display_name: model.name } : {}),
+		...(model.contextLimit ? { context_limit: model.contextLimit } : {}),
+		...(model.maxOutputTokens
+			? { max_output_tokens: model.maxOutputTokens }
+			: {}),
+		...(typeof model.supportsThinking === "boolean"
+			? { supports_thinking: model.supportsThinking }
+			: { supports_thinking: true }),
+		...(model.supportsThinking === false
+			? {}
+			: { thinking_controls: effortThinkingControls() }),
+	};
+}
+
+function effortThinkingControls(): NonNullable<
+	ModelCatalogItem["thinking_controls"]
+> {
+	return {
+		supported: true,
+		allowed_fields: ["effort"],
+		defaults_only: false,
+	};
+}
+
+export function isOpenAIChatModel(id: string): boolean {
 	const normalized = id.toLowerCase();
 	return !OPENAI_NON_CHAT_MODEL_PATTERNS.some((pattern) =>
 		normalized.includes(pattern),
@@ -114,23 +220,41 @@ export function openAIModelAcceptsImages(model: string): boolean {
 async function* streamOpenAI(
 	request: ByokStreamRequest,
 	key: string,
+	options: OpenAIChatAdapterOptions = OPENAI_OPTIONS,
 ): AsyncIterable<ProviderEvent> {
+	const modelConfig = options.models?.find(
+		(entry) => entry.id === request.model,
+	);
 	const body: Record<string, unknown> = {
+		...options.extraArgs,
+		...modelConfig?.extraArgs,
 		model: request.model,
-		messages: toOpenAIMessages(request),
+		messages: toOpenAIMessages(
+			request,
+			modelConfig?.noImageSupport === true ? false : undefined,
+			options.id,
+		),
 		stream: true,
-		// Without this the final chunk carries no usage at all.
-		stream_options: { include_usage: true },
 	};
+	// Official OpenAI needs this to emit usage. Some compatible servers reject
+	// the option, so custom providers opt in through extraArgs instead.
+	if (options.id === "openai") {
+		body.stream_options = { include_usage: true };
+	}
 	if (request.tools.length > 0) {
-		body.tools = request.tools;
+		body.tools = compatibleOpenAITools(request.tools);
 		body.tool_choice = "auto";
 	}
 	// OpenAI caches automatically on the prompt prefix (>1024 tokens), but only
 	// when a request lands on a machine that already holds it. The cache key
 	// pins one conversation to one shard, which is what turns an incidental hit
 	// rate into a reliable one across a long tool loop.
-	if (request.cacheKey) body.prompt_cache_key = request.cacheKey;
+	if (request.cacheKey && options.id === "openai") {
+		body.prompt_cache_key = request.cacheKey;
+	}
+	if (request.maxOutputTokens ?? modelConfig?.maxOutputTokens) {
+		body.max_tokens = request.maxOutputTokens ?? modelConfig?.maxOutputTokens;
+	}
 	const effort = thinkingEffort(request.thinking);
 	// Only sent when thinking was actually requested: non-reasoning models
 	// reject the parameter outright. GPT-5.4 through GPT-5.6 also reject enabled
@@ -155,10 +279,10 @@ async function* streamOpenAI(
 	};
 
 	const sseRequest: Parameters<typeof postSseJson>[0] = {
-		url: `${API_BASE}/chat/completions`,
-		headers: headers(key),
+		url: joinProviderUrl(options.baseUrl, "chat/completions"),
+		headers: requestHeaders(key, options),
 		body,
-		provider: "openai",
+		provider: options.id,
 	};
 	if (request.signal) sseRequest.signal = request.signal;
 
@@ -167,7 +291,7 @@ async function* streamOpenAI(
 			const error = chunk.error as { message?: string };
 			yield {
 				kind: "failed",
-				error: error.message ?? "OpenAI returned an error event",
+				error: error.message ?? `${options.label} returned an error event`,
 			};
 			return;
 		}
@@ -183,6 +307,20 @@ async function* streamOpenAI(
 							index?: number;
 							id?: string;
 							function?: { name?: string; arguments?: string };
+							extra_content?: {
+								google?: { thought_signature?: string };
+							};
+						}>;
+					};
+					message?: {
+						content?: string | null;
+						tool_calls?: Array<{
+							index?: number;
+							id?: string;
+							function?: { name?: string; arguments?: string };
+							extra_content?: {
+								google?: { thought_signature?: string };
+							};
 						}>;
 					};
 					finish_reason?: string | null;
@@ -191,12 +329,12 @@ async function* streamOpenAI(
 		if (!choice) continue;
 		if (choice.finish_reason) finishReason = choice.finish_reason;
 
-		const delta = choice.delta;
+		const delta = choice.delta ?? choice.message;
 		if (delta?.content) {
 			yield { kind: "assistant_delta", text: delta.content };
 		}
-		for (const partial of delta?.tool_calls ?? []) {
-			const index = partial.index ?? 0;
+		for (const [position, partial] of (delta?.tool_calls ?? []).entries()) {
+			const index = partial.index ?? position;
 			const existing = pending.get(index) ?? {
 				id: partial.id ?? `call_${index}`,
 				name: "",
@@ -208,6 +346,8 @@ async function* streamOpenAI(
 			if (partial.function?.arguments) {
 				existing.args += partial.function.arguments;
 			}
+			const signature = partial.extra_content?.google?.thought_signature;
+			if (signature) existing.signature = signature;
 			pending.set(index, existing);
 			// Announce as soon as the name is known so the row renders while the
 			// arguments are still streaming.
@@ -221,7 +361,7 @@ async function* streamOpenAI(
 	if (finishReason === null) {
 		yield {
 			kind: "failed",
-			error: unexpectedStreamEndMessage("openai"),
+			error: unexpectedStreamEndMessage(options.label),
 			retryable: true,
 		};
 		return;
@@ -252,6 +392,12 @@ async function* streamOpenAI(
 				id: partial.id,
 				name: partial.name,
 				input: parseArguments(partial.args),
+				...(partial.signature
+					? {
+							signature: partial.signature,
+							signatureProvider: options.id,
+						}
+					: {}),
 			};
 			calls.push(call);
 			yield { kind: "tool_ready", call };
@@ -260,8 +406,11 @@ async function* streamOpenAI(
 
 	const finalUsage = {
 		...usage,
-		provider: "openai",
+		provider: options.id,
 		model: request.model,
+		...(modelConfig?.contextLimit
+			? { contextLimit: modelConfig.contextLimit }
+			: {}),
 	};
 
 	// Some models report finish_reason "stop" alongside emitted tool calls;
@@ -311,9 +460,13 @@ function parseArguments(args: string): unknown {
 	}
 }
 
-export function toOpenAIMessages(request: ByokStreamRequest): unknown[] {
+export function toOpenAIMessages(
+	request: ByokStreamRequest,
+	imageSupport?: boolean,
+	providerId?: string,
+): unknown[] {
 	const out: unknown[] = [{ role: "system", content: request.systemPrompt }];
-	const acceptsImages = openAIModelAcceptsImages(request.model);
+	const acceptsImages = imageSupport ?? openAIModelAcceptsImages(request.model);
 	const imagePlan = acceptsImages
 		? planToolImages(request.messages)
 		: new Set<string>();
@@ -338,6 +491,15 @@ export function toOpenAIMessages(request: ByokStreamRequest): unknown[] {
 						name: call.name,
 						arguments: JSON.stringify(call.input ?? {}),
 					},
+					...(call.signature &&
+					call.signatureProvider &&
+					call.signatureProvider === providerId
+						? {
+								extra_content: {
+									google: { thought_signature: call.signature },
+								},
+							}
+						: {}),
 				}));
 			}
 			out.push(entry);

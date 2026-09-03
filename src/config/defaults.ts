@@ -44,7 +44,7 @@ const KEY_ONLY_DEFAULT_MODELS: Readonly<Record<ByokProviderId, ModelRef>> = {
 export function keyOnlyDefaultModel(
 	provider: ByokProviderId | undefined,
 ): ModelRef | null {
-	return provider ? KEY_ONLY_DEFAULT_MODELS[provider] : null;
+	return provider ? (KEY_ONLY_DEFAULT_MODELS[provider] ?? null) : null;
 }
 
 export function formatModel(ref: ModelRef): string {

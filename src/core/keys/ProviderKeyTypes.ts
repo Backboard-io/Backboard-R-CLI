@@ -1,3 +1,6 @@
+import type { CustomProviderProtocol } from "../../config/providers.ts";
+import { isValidProviderId } from "../../config/providers.ts";
+
 /**
  * BYOK (bring-your-own-key) provider identity and storage shapes.
  *
@@ -12,10 +15,12 @@ export const BYOK_PROVIDER_IDS = [
 	"openrouter",
 ] as const;
 
-export type ByokProviderId = (typeof BYOK_PROVIDER_IDS)[number];
+/** Built-ins are a closed display-order list; configured provider ids are dynamic. */
+export type BuiltinProviderId = (typeof BYOK_PROVIDER_IDS)[number];
+export type ByokProviderId = string;
 
 export function isByokProviderId(value: string): value is ByokProviderId {
-	return (BYOK_PROVIDER_IDS as readonly string[]).includes(value);
+	return isValidProviderId(value);
 }
 
 /** One saved key as it appears on disk in ~/.backboard/keys.json. */
@@ -26,9 +31,7 @@ export interface StoredProviderKey {
 	addedAt: string;
 }
 
-export type ProviderKeyFile = Partial<
-	Record<ByokProviderId, StoredProviderKey>
->;
+export type ProviderKeyFile = Record<string, StoredProviderKey | undefined>;
 
 /** A saved key resolved for use: the secret plus who it belongs to. */
 export interface ResolvedProviderKey {
@@ -49,6 +52,10 @@ export interface ProviderKeyStatus {
 	masked: string;
 	enabled: boolean;
 	addedAt: string | null;
+	custom?: boolean;
+	protocol?: CustomProviderProtocol;
+	baseUrl?: string;
+	error?: string;
 }
 
 export interface ProviderKeyControllerOptions {

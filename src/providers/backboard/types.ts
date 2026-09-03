@@ -211,6 +211,8 @@ export interface ProviderToolCall {
 	 * this unset.
 	 */
 	signature?: string;
+	/** Provider id that issued `signature`; prevents cross-provider replay. */
+	signatureProvider?: string;
 }
 
 export interface ProviderUsage {
@@ -242,6 +244,7 @@ export interface ModelInfo extends ThinkingModelMetadata {
 
 export interface ModelCatalogItem {
 	name: string;
+	display_name?: string;
 	provider: string;
 	model_type: string;
 	last_updated?: string | number | null;

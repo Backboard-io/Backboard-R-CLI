@@ -76,6 +76,8 @@ export interface ProviderAdapter {
 	readonly consoleUrl: string;
 	/** Human hint for the expected key shape, e.g. "sk-ant-...". */
 	readonly keyHint: string;
+	/** False for keyless or independently authenticated endpoints. */
+	readonly requiresKey?: boolean;
 
 	/** Cheap local shape check run before spending a network round-trip. */
 	looksLikeKey(key: string): boolean;
@@ -95,6 +97,11 @@ export interface ProviderAdapter {
 	 * key; static providers can return their answer directly.
 	 */
 	supportsThinking(model: string, key: string): boolean | Promise<boolean>;
+
+	/** Provider-native thinking controls for custom provider IDs. */
+	thinkingControls?(
+		model: string,
+	): ModelCatalogItem["thinking_controls"] | undefined;
 
 	/** Streams one assistant turn as the same ProviderEvents Backboard yields. */
 	stream(request: ByokStreamRequest, key: string): AsyncIterable<ProviderEvent>;

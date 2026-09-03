@@ -4,13 +4,13 @@ import type React from "react";
 import { useState } from "react";
 import type { ProviderKeyController } from "../../core/keys/ProviderKeyController.ts";
 import {
+	type BuiltinProviderId,
 	BYOK_PROVIDER_IDS,
-	type ByokProviderId,
 	maskProviderKey,
 } from "../../core/keys/ProviderKeyTypes.ts";
 import {
+	BUILTIN_PROVIDER_REGISTRY,
 	BYOK_ADAPTER_LIST,
-	BYOK_ADAPTERS,
 } from "../../providers/byok/registry.ts";
 import { errorMessage } from "../../utils/errors.ts";
 import { useListSelection } from "../hooks/useListSelection.ts";
@@ -24,8 +24,8 @@ import { Spinner } from "./Spinner.tsx";
 interface Props {
 	controller: ProviderKeyController;
 	/** Skips the provider step when the caller already picked one. */
-	provider?: ByokProviderId;
-	onDone: (provider: ByokProviderId) => void;
+	provider?: BuiltinProviderId;
+	onDone: (provider: BuiltinProviderId) => void;
 	onCancel: () => void;
 }
 
@@ -45,13 +45,14 @@ export function ProviderKeySetup({
 }: Props): React.ReactElement {
 	const [step, setStep] = useState<Step>(provider ? "key" : "provider");
 	const selection = useListSelection(BYOK_PROVIDER_IDS.length);
-	const selected: ByokProviderId =
+	const selected: BuiltinProviderId =
 		provider ?? BYOK_PROVIDER_IDS[selection.index] ?? BYOK_PROVIDER_IDS[0];
 	const [value, setValue] = useState("");
 	const [error, setError] = useState<string | null>(null);
 	const [saving, setSaving] = useState(false);
 
-	const adapter = BYOK_ADAPTERS[selected];
+	const adapter = BUILTIN_PROVIDER_REGISTRY.get(selected);
+	if (!adapter) throw new Error(`Unknown provider: ${selected}`);
 	// Read once, not per render: `list()` re-reads the key file from disk and
 	// decrypts every entry, and this component re-renders on each keystroke of
 	// the masked input. Nothing can change it while this screen is open - the

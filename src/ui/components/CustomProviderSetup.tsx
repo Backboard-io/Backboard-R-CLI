@@ -2,6 +2,7 @@ import { Box, Text, useInput } from "ink";
 import TextInput from "ink-text-input";
 import type React from "react";
 import { useState } from "react";
+import { normalizeApiUrl } from "../../config/env.ts";
 import {
 	CUSTOM_PROVIDER_PROTOCOLS,
 	type CustomModelDefinition,
@@ -15,7 +16,10 @@ import {
 import type { ProviderKeyController } from "../../core/keys/ProviderKeyController.ts";
 import { errorMessage } from "../../utils/errors.ts";
 import type { JsonObject } from "../../utils/JsonTypes.ts";
+import { useAsyncAction } from "../hooks/useAsyncAction.ts";
 import { theme } from "../theme/theme.ts";
+import { EntryListEditor } from "./EntryListEditor.tsx";
+import type { EntryListItem } from "./EntryListEditor.types.ts";
 import { ErrorLine } from "./ErrorLine.tsx";
 import { HintFooter } from "./HintFooter.tsx";
 import { Panel } from "./Panel.tsx";
@@ -43,9 +47,9 @@ type Draft = {
 	authType: CustomProviderAuth["type"];
 	credential: string;
 	modelsEndpoint: string;
-	models: string;
-	headers: string;
-	extraArgs: string;
+	models: CustomModelDefinition[];
+	headers: Record<string, string>;
+	extraArgs: JsonObject;
 };
 
 const FIELD_LABELS = [
@@ -56,9 +60,9 @@ const FIELD_LABELS = [
 	"Authentication",
 	"Credential",
 	"Models endpoint",
-	"Manual models JSON",
-	"Headers JSON",
-	"Extra request args JSON",
+	"Manual models",
+	"Headers",
+	"Extra request arguments",
 ] as const;
 
 export function CustomProviderSetup({
@@ -78,18 +82,19 @@ export function CustomProviderSetup({
 			existing?.discoverModels === false
 				? "off"
 				: (existing?.modelsPath ?? "models"),
-		models: JSON.stringify(existing?.models ?? []),
-		headers: JSON.stringify(existing?.headers ?? {}),
-		extraArgs: JSON.stringify(existing?.extraArgs ?? {}),
+		models: existing?.models ?? [],
+		headers: existing?.headers ?? {},
+		extraArgs: existing?.extraArgs ?? {},
 	}));
 	const [step, setStep] = useState(0);
 	const [choiceIndex, setChoiceIndex] = useState(0);
-	const [error, setError] = useState<string | null>(null);
-	const [saving, setSaving] = useState(false);
+	const asyncAction = useAsyncAction();
+	const { error, running: saving, setError } = asyncAction;
 	const editing = existing !== undefined;
 
 	const isProtocol = step === 2;
 	const isAuth = step === 4;
+	const isEntryList = step >= 7 && step <= 9;
 	const isReview = step >= FIELD_LABELS.length;
 
 	const advance = (): void => {
@@ -121,23 +126,25 @@ export function CustomProviderSetup({
 			setError(errorMessage(err));
 			return;
 		}
-		setSaving(true);
-		setError(null);
-		controller
-			.saveCustomProvider(
+		asyncAction.run(`Testing ${draft.name}`, async (signal) => {
+			await controller.saveCustomProvider(
 				definition,
 				draft.authType === "apiKey" && draft.credential.trim()
 					? draft.credential
 					: undefined,
 				existing?.id,
-			)
-			.then(() => onDone(definition.id))
-			.catch((err) => setError(errorMessage(err)))
-			.finally(() => setSaving(false));
+				signal,
+			);
+			onDone(definition.id);
+		});
 	};
 
 	useInput((input, key) => {
-		if (saving) return;
+		if (isEntryList) return;
+		if (saving) {
+			if (key.escape) asyncAction.cancel();
+			return;
+		}
 		if (key.escape) {
 			back();
 			return;
@@ -218,16 +225,85 @@ export function CustomProviderSetup({
 					</Text>
 				</Box>
 				<ErrorLine error={error} />
-				{saving ? <Spinner label={`Testing ${draft.name}`} /> : null}
-				<HintFooter hints={["Enter test & save", "Esc back"]} />
+				{saving && asyncAction.label ? (
+					<Spinner label={asyncAction.label} />
+				) : null}
+				<HintFooter
+					hints={saving ? ["Esc cancel"] : ["Enter test & save", "Esc back"]}
+				/>
+			</Panel>
+		);
+	}
+
+	if (step === 7) {
+		return (
+			<Panel title={FIELD_LABELS[step]}>
+				<EntryListEditor
+					key="provider-models"
+					title="Models"
+					help="Add model IDs that are not returned by model discovery."
+					entries={draft.models.map((model) => ({
+						key: model.id,
+						value: "",
+						data: model,
+					}))}
+					keyLabel="Model ID"
+					keyPlaceholder="gpt-5"
+					onChange={(entries) => {
+						setDraft((current) => ({
+							...current,
+							models: entries.map((entry) => ({
+								...(isCustomModelDefinition(entry.data) ? entry.data : {}),
+								id: entry.key,
+							})),
+						}));
+						setError(null);
+					}}
+					onSubmit={advance}
+					onCancel={back}
+				/>
+			</Panel>
+		);
+	}
+
+	if (step === 8 || step === 9) {
+		const headers = step === 8;
+		const entries = objectEntries(headers ? draft.headers : draft.extraArgs);
+		return (
+			<Panel title={FIELD_LABELS[step]}>
+				<EntryListEditor
+					key={headers ? "provider-headers" : "provider-arguments"}
+					title={headers ? "Headers" : "Request arguments"}
+					help={
+						headers
+							? "Values may reference environment variables. Secret headers are masked."
+							: "Numbers, booleans, null, arrays, and objects are detected automatically."
+					}
+					entries={entries}
+					keyLabel={headers ? "Header" : "Argument"}
+					valueLabel="Value"
+					keyPlaceholder={headers ? "X-Custom-Header" : "temperature"}
+					valuePlaceholder={headers ? "value" : "0.2"}
+					isSecret={isSensitiveKey}
+					validate={(entry) => validateEntry(entry, headers)}
+					onChange={(next) => {
+						setDraft((current) => ({
+							...current,
+							...(headers
+								? { headers: entriesToHeaders(next) }
+								: { extraArgs: entriesToObject(next) }),
+						}));
+						setError(null);
+					}}
+					onSubmit={advance}
+					onCancel={back}
+				/>
 			</Panel>
 		);
 	}
 
 	const value = valueForStep(draft, step);
-	const secret =
-		(step === 5 && draft.authType === "apiKey") ||
-		(step === 8 && containsCredentialHeader(value));
+	const secret = step === 5 && draft.authType === "apiKey";
 	return (
 		<Panel title={FIELD_LABELS[step]}>
 			<Text color={theme.subtle}>{helpForStep(step, draft.authType)}</Text>
@@ -272,15 +348,15 @@ function buildDefinition(draft: Draft): CustomProviderDefinition {
 		id: normalizeProviderId(draft.id),
 		name: draft.name.trim(),
 		protocol: draft.protocol,
-		baseUrl: draft.baseUrl.trim().replace(/\/+$/, ""),
+		baseUrl: normalizeApiUrl(draft.baseUrl),
 		auth:
 			draft.authType === "env"
 				? { type: "env", variable: draft.credential.trim() }
 				: { type: draft.authType },
 		discoverModels: endpoint.toLowerCase() !== "off",
-		headers: parseHeaders(draft.headers),
-		extraArgs: parseObject(draft.extraArgs, "Extra request arguments"),
-		models: parseModels(draft.models),
+		headers: draft.headers,
+		extraArgs: draft.extraArgs,
+		models: draft.models,
 	};
 	if (definition.discoverModels && endpoint && endpoint !== "models") {
 		definition.modelsPath = endpoint;
@@ -318,65 +394,75 @@ function validateStep(draft: Draft, step: number): void {
 	if (step === 6 && !draft.modelsEndpoint.trim()) {
 		throw new Error('Enter a models endpoint, or "off".');
 	}
-	if (step === 7) parseModels(draft.models);
-	if (step === 8) parseHeaders(draft.headers);
-	if (step === 9) parseObject(draft.extraArgs, "Extra request arguments");
 }
 
-function parseModels(value: string): CustomModelDefinition[] {
-	const parsed = parseJson(value || "[]", "Manual models");
-	if (!Array.isArray(parsed))
-		throw new Error("Manual models must be a JSON array.");
-	for (const model of parsed) {
-		if (
-			typeof model !== "object" ||
-			model === null ||
-			Array.isArray(model) ||
-			typeof (model as { id?: unknown }).id !== "string"
-		) {
-			throw new Error('Each manual model needs an "id" string.');
-		}
-	}
-	return parsed as CustomModelDefinition[];
-}
-
-function parseObject(value: string, label: string): JsonObject {
-	const parsed = parseJson(value || "{}", label);
-	if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-		throw new Error(`${label} must be a JSON object.`);
-	}
-	return parsed as JsonObject;
-}
-
-function parseHeaders(value: string): Record<string, string> {
-	const parsed = parseObject(value, "Headers");
-	for (const [name, headerValue] of Object.entries(parsed)) {
-		if (!name.trim() || typeof headerValue !== "string") {
-			throw new Error("Header names and values must be strings.");
-		}
-		if (
-			isCredentialHeader(name) &&
-			!/\$\{[A-Za-z_][A-Za-z0-9_]*\}/.test(headerValue)
-		) {
-			throw new Error(
-				`Header ${name} may contain a secret; use an environment variable reference.`,
-			);
-		}
-	}
-	return parsed as Record<string, string>;
-}
-
-function containsCredentialHeader(value: string): boolean {
-	return /"(?:[^"]*(?:auth|cookie|token|secret|api[-_]?key|credential|password)[^"]*)"\s*:/i.test(
-		value,
-	);
-}
-
-function parseJson(value: string, label: string): unknown {
+function parseEntryValue(value: string): JsonObject[string] {
 	try {
 		return JSON.parse(value);
 	} catch {
-		throw new Error(`${label} contains invalid JSON.`);
+		return value;
+	}
+}
+
+function objectEntries(value: JsonObject): EntryListItem[] {
+	return Object.entries(value).map(([key, entry]) => ({
+		key,
+		value: displayEntryValue(entry),
+		data: entry,
+	}));
+}
+
+function entriesToObject(entries: readonly EntryListItem[]): JsonObject {
+	return Object.fromEntries(
+		entries.map((entry) => [
+			entry.key,
+			entry.data !== undefined &&
+			displayEntryValue(entry.data as JsonObject[string]) === entry.value
+				? (entry.data as JsonObject[string])
+				: parseEntryValue(entry.value),
+		]),
+	);
+}
+
+function displayEntryValue(value: JsonObject[string]): string {
+	return typeof value === "string" ? value : JSON.stringify(value);
+}
+
+function isCustomModelDefinition(
+	value: unknown,
+): value is CustomModelDefinition {
+	return (
+		typeof value === "object" &&
+		value !== null &&
+		!Array.isArray(value) &&
+		typeof (value as { id?: unknown }).id === "string"
+	);
+}
+
+function entriesToHeaders(
+	entries: readonly EntryListItem[],
+): Record<string, string> {
+	return Object.fromEntries(entries.map((entry) => [entry.key, entry.value]));
+}
+
+function isSensitiveKey(key: string): boolean {
+	return (
+		isCredentialHeader(key) ||
+		/(?:auth|cookie|token|secret|api[-_]?key|credential|password)/i.test(key)
+	);
+}
+
+function validateEntry(entry: EntryListItem, header: boolean): void {
+	if (header && !entry.value.trim()) {
+		throw new Error("Header values cannot be empty.");
+	}
+	if (
+		isSensitiveKey(entry.key) &&
+		!/\$\{[A-Za-z_][A-Za-z0-9_]*\}/.test(entry.value)
+	) {
+		throw new Error(
+			`${entry.key} may contain a secret; use an environment variable reference.`,
+		);
 	}
 }
 
@@ -399,12 +485,6 @@ function valueForStep(draft: Draft, step: number): string {
 			return draft.credential;
 		case 6:
 			return draft.modelsEndpoint;
-		case 7:
-			return draft.models;
-		case 8:
-			return draft.headers;
-		case 9:
-			return draft.extraArgs;
 		default:
 			return "";
 	}
@@ -422,12 +502,6 @@ function setValueForStep(draft: Draft, step: number, value: string): Draft {
 			return { ...draft, credential: value };
 		case 6:
 			return { ...draft, modelsEndpoint: value };
-		case 7:
-			return { ...draft, models: value };
-		case 8:
-			return { ...draft, headers: value };
-		case 9:
-			return { ...draft, extraArgs: value };
 		default:
 			return draft;
 	}
@@ -472,17 +546,6 @@ function helpForStep(step: number, auth: CustomProviderAuth["type"]): string {
 				: "Stored encrypted and never rendered in terminal output.";
 		case 6:
 			return 'Usually "models". Use a path or full URL, or "off" for manual models only.';
-		case 7:
-			return 'Example: [{"id":"gpt-5","contextLimit":400000,"maxOutputTokens":32768}]';
-		case 8:
-			return (
-				'Values may reference environment variables, e.g. {"X-Key":"' +
-				"$" +
-				"{TOKEN}" +
-				'"}'
-			);
-		case 9:
-			return '{"temperature":0.2}. Transport fields are protected.';
 		default:
 			return "";
 	}
@@ -508,11 +571,6 @@ function placeholderForStep(
 					: "API key";
 		case 6:
 			return "models";
-		case 7:
-			return "[]";
-		case 8:
-		case 9:
-			return "{}";
 		default:
 			return "";
 	}

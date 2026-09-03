@@ -1,5 +1,10 @@
 import type { OpenAITool } from "../../core/tools/schema.ts";
 
+const SCHEMA_CACHE = new WeakMap<
+	object,
+	OpenAITool["function"]["parameters"]
+>();
+
 /**
  * OpenAI-compatible providers vary in their JSON Schema support. In particular,
  * Gemini's compatibility endpoint rejects required recursive `$ref` loops.
@@ -13,13 +18,23 @@ export function compatibleOpenAITools(
 		...tool,
 		function: {
 			...tool.function,
-			parameters: expandSchema(
-				tool.function.parameters,
-				tool.function.parameters,
-				new Set(),
-			) as OpenAITool["function"]["parameters"],
+			parameters: compatibleParameters(tool.function.parameters),
 		},
 	}));
+}
+
+function compatibleParameters(
+	parameters: OpenAITool["function"]["parameters"],
+): OpenAITool["function"]["parameters"] {
+	const cached = SCHEMA_CACHE.get(parameters);
+	if (cached) return cached;
+	const expanded = expandSchema(
+		parameters,
+		parameters,
+		new Set(),
+	) as OpenAITool["function"]["parameters"];
+	SCHEMA_CACHE.set(parameters, expanded);
+	return expanded;
 }
 
 function expandSchema(

@@ -26,7 +26,7 @@ export interface AuthState {
 	backboard: BackboardEnv | null;
 	/** Saved provider keys that are currently toggled on. */
 	providerKeys: ResolvedProviderKey[];
-	providerRegistry?: ProviderRegistry;
+	providerRegistry: ProviderRegistry;
 }
 
 export interface ResolveAuthOptions {

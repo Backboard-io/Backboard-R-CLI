@@ -22,6 +22,7 @@ import {
 	usesNativeAdaptiveThinking,
 } from "../thinking.ts";
 import { planToolImages, renderToolResult } from "../toolImages.ts";
+import type { ConfigurableAdapterOptions } from "./ConfigurableAdapterTypes.ts";
 
 const API_VERSION = "2023-06-01";
 const DEFAULT_MAX_OUTPUT_TOKENS = 32_000;
@@ -70,19 +71,7 @@ interface PendingToolBlock {
 	json: string;
 }
 
-export interface AnthropicAdapterOptions {
-	id: string;
-	label: string;
-	baseUrl: string;
-	consoleUrl?: string;
-	keyHint?: string;
-	requiresKey?: boolean;
-	headers?: Record<string, string>;
-	extraArgs?: Record<string, unknown>;
-	modelsPath?: string;
-	discoverModels?: boolean;
-	models?: readonly CustomModelDefinition[];
-}
+export type AnthropicAdapterOptions = ConfigurableAdapterOptions;
 
 const ANTHROPIC_OPTIONS: AnthropicAdapterOptions = {
 	id: "anthropic",

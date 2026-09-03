@@ -225,19 +225,17 @@ export class ProviderKeyController {
 					: `Enter credentials for ${candidate.name}.`,
 			);
 		}
-		try {
-			await adapter.validateKey(key, signal);
-		} catch (err) {
-			throw new Error(validationMessage(adapter.label, err));
-		}
 		let models: string[];
 		try {
 			models = (await adapter.listModels(key, signal)).map(
 				(model) => model.name,
 			);
 		} catch (err) {
+			if (err instanceof ByokError && err.isAuthFailure) {
+				throw new Error(validationMessage(adapter.label, err));
+			}
 			throw new Error(
-				`Connected to ${adapter.label}, but could not load its models: ${errorMessage(err)}`,
+				`Could not load models from ${adapter.label}: ${errorMessage(err)}`,
 			);
 		}
 		if (models.length === 0) {

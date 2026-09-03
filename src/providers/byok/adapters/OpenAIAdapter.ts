@@ -1,7 +1,4 @@
-import {
-	type CustomModelDefinition,
-	joinProviderUrl,
-} from "../../../config/providers.ts";
+import { joinProviderUrl } from "../../../config/providers.ts";
 import { contextWindowFor } from "../../../core/context/ContextWindow.ts";
 import type {
 	ModelCatalogItem,
@@ -23,15 +20,18 @@ import {
 	renderToolResult,
 	TOOL_IMAGE_NOTE,
 } from "../toolImages.ts";
+import type { ConfigurableAdapterOptions } from "./ConfigurableAdapterTypes.ts";
 import {
 	OPENAI_DISABLED_TOOL_REASONING_PATTERN,
 	OPENAI_NON_CHAT_MODEL_PATTERNS,
 } from "./OpenAIAdapter.constants.ts";
-
-interface OpenAIModelsResponse {
-	data?: Array<{ id?: string; name?: string; created?: number }>;
-	models?: Array<{ id?: string; name?: string; created?: number }>;
-}
+import {
+	configurableModelsUrl,
+	configuredOpenAIModel,
+	effortThinkingControls,
+	type OpenAICompatibleModelsResponse,
+	openAICompatibleHeaders,
+} from "./OpenAICompatibleShared.ts";
 
 /** A tool call assembled across `delta.tool_calls` chunks, keyed by index. */
 interface PendingToolCall {
@@ -42,19 +42,7 @@ interface PendingToolCall {
 	signature?: string;
 }
 
-export interface OpenAIChatAdapterOptions {
-	id: string;
-	label: string;
-	baseUrl: string;
-	consoleUrl?: string;
-	keyHint?: string;
-	requiresKey?: boolean;
-	headers?: Record<string, string>;
-	extraArgs?: Record<string, unknown>;
-	modelsPath?: string;
-	discoverModels?: boolean;
-	models?: readonly CustomModelDefinition[];
-}
+export type OpenAIChatAdapterOptions = ConfigurableAdapterOptions;
 
 const OPENAI_OPTIONS: OpenAIChatAdapterOptions = {
 	id: "openai",
@@ -86,9 +74,9 @@ export function createOpenAIChatAdapter(
 
 		async validateKey(key, signal) {
 			if (options.discoverModels === false) return;
-			await getJson<OpenAIModelsResponse>(
-				modelsUrl(options),
-				requestHeaders(key, options),
+			await getJson<OpenAICompatibleModelsResponse>(
+				configurableModelsUrl(options),
+				openAICompatibleHeaders(key, options),
 				options.id,
 				signal,
 			);
@@ -98,9 +86,9 @@ export function createOpenAIChatAdapter(
 			const response =
 				options.discoverModels === false
 					? { data: [] }
-					: await getJson<OpenAIModelsResponse>(
-							modelsUrl(options),
-							requestHeaders(key, options),
+					: await getJson<OpenAICompatibleModelsResponse>(
+							configurableModelsUrl(options),
+							openAICompatibleHeaders(key, options),
 							options.id,
 							signal,
 						);
@@ -132,7 +120,10 @@ export function createOpenAIChatAdapter(
 					models.delete(model.id.toLowerCase());
 					continue;
 				}
-				models.set(model.id.toLowerCase(), configuredModel(options.id, model));
+				models.set(
+					model.id.toLowerCase(),
+					configuredOpenAIModel(options.id, model),
+				);
 			}
 			return [...models.values()];
 		},
@@ -152,52 +143,6 @@ export function createOpenAIChatAdapter(
 		stream(request, key) {
 			return streamOpenAI(request, key, options);
 		},
-	};
-}
-
-function requestHeaders(
-	key: string,
-	options: OpenAIChatAdapterOptions,
-): Record<string, string> {
-	return {
-		...(key.trim() ? { Authorization: `Bearer ${key.trim()}` } : {}),
-		...options.headers,
-	};
-}
-
-function modelsUrl(options: OpenAIChatAdapterOptions): string {
-	return joinProviderUrl(options.baseUrl, options.modelsPath ?? "models");
-}
-
-function configuredModel(
-	provider: string,
-	model: CustomModelDefinition,
-): ModelCatalogItem {
-	return {
-		name: model.id,
-		provider,
-		model_type: "llm",
-		...(model.name ? { display_name: model.name } : {}),
-		...(model.contextLimit ? { context_limit: model.contextLimit } : {}),
-		...(model.maxOutputTokens
-			? { max_output_tokens: model.maxOutputTokens }
-			: {}),
-		...(typeof model.supportsThinking === "boolean"
-			? { supports_thinking: model.supportsThinking }
-			: { supports_thinking: true }),
-		...(model.supportsThinking === false
-			? {}
-			: { thinking_controls: effortThinkingControls() }),
-	};
-}
-
-function effortThinkingControls(): NonNullable<
-	ModelCatalogItem["thinking_controls"]
-> {
-	return {
-		supported: true,
-		allowed_fields: ["effort"],
-		defaults_only: false,
 	};
 }
 
@@ -280,7 +225,7 @@ async function* streamOpenAI(
 
 	const sseRequest: Parameters<typeof postSseJson>[0] = {
 		url: joinProviderUrl(options.baseUrl, "chat/completions"),
-		headers: requestHeaders(key, options),
+		headers: openAICompatibleHeaders(key, options),
 		body,
 		provider: options.id,
 	};

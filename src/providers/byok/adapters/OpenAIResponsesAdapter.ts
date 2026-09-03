@@ -1,7 +1,4 @@
-import {
-	type CustomModelDefinition,
-	joinProviderUrl,
-} from "../../../config/providers.ts";
+import { joinProviderUrl } from "../../../config/providers.ts";
 import { contextWindowFor } from "../../../core/context/ContextWindow.ts";
 import type { OpenAITool } from "../../../core/tools/schema.ts";
 import type {
@@ -23,25 +20,16 @@ import {
 	renderToolResult,
 	TOOL_IMAGE_NOTE,
 } from "../toolImages.ts";
+import type { ConfigurableAdapterOptions } from "./ConfigurableAdapterTypes.ts";
+import {
+	configurableModelsUrl,
+	configuredOpenAIModel,
+	effortThinkingControls,
+	type OpenAICompatibleModelsResponse,
+	openAICompatibleHeaders,
+} from "./OpenAICompatibleShared.ts";
 
-interface ModelsResponse {
-	data?: Array<{ id?: string; name?: string; created?: number }>;
-	models?: Array<{ id?: string; name?: string; created?: number }>;
-}
-
-export interface OpenAIResponsesAdapterOptions {
-	id: string;
-	label: string;
-	baseUrl: string;
-	consoleUrl?: string;
-	keyHint?: string;
-	requiresKey?: boolean;
-	headers?: Record<string, string>;
-	extraArgs?: Record<string, unknown>;
-	modelsPath?: string;
-	discoverModels?: boolean;
-	models?: readonly CustomModelDefinition[];
-}
+export type OpenAIResponsesAdapterOptions = ConfigurableAdapterOptions;
 
 interface PendingCall {
 	id: string;
@@ -64,9 +52,9 @@ export function createOpenAIResponsesAdapter(
 		},
 		async validateKey(key, signal) {
 			if (options.discoverModels === false) return;
-			await getJson<ModelsResponse>(
-				modelsUrl(options),
-				headers(key, options),
+			await getJson<OpenAICompatibleModelsResponse>(
+				configurableModelsUrl(options),
+				openAICompatibleHeaders(key, options),
 				options.id,
 				signal,
 			);
@@ -75,9 +63,9 @@ export function createOpenAIResponsesAdapter(
 			const response =
 				options.discoverModels === false
 					? { data: [] }
-					: await getJson<ModelsResponse>(
-							modelsUrl(options),
-							headers(key, options),
+					: await getJson<OpenAICompatibleModelsResponse>(
+							configurableModelsUrl(options),
+							openAICompatibleHeaders(key, options),
 							options.id,
 							signal,
 						);
@@ -104,7 +92,10 @@ export function createOpenAIResponsesAdapter(
 					models.delete(model.id.toLowerCase());
 					continue;
 				}
-				models.set(model.id.toLowerCase(), configuredModel(options.id, model));
+				models.set(
+					model.id.toLowerCase(),
+					configuredOpenAIModel(options.id, model),
+				);
 			}
 			return [...models.values()];
 		},
@@ -164,7 +155,7 @@ async function* streamResponses(
 
 	const sseRequest: Parameters<typeof postSseJson>[0] = {
 		url: joinProviderUrl(options.baseUrl, "responses"),
-		headers: headers(key, options),
+		headers: openAICompatibleHeaders(key, options),
 		body,
 		provider: options.id,
 	};
@@ -471,52 +462,6 @@ function toResponsesTools(tools: readonly OpenAITool[]): unknown[] {
 		description: tool.function.description,
 		parameters: tool.function.parameters,
 	}));
-}
-
-function headers(
-	key: string,
-	options: OpenAIResponsesAdapterOptions,
-): Record<string, string> {
-	return {
-		...(key.trim() ? { Authorization: `Bearer ${key.trim()}` } : {}),
-		...options.headers,
-	};
-}
-
-function modelsUrl(options: OpenAIResponsesAdapterOptions): string {
-	return joinProviderUrl(options.baseUrl, options.modelsPath ?? "models");
-}
-
-function configuredModel(
-	provider: string,
-	model: CustomModelDefinition,
-): ModelCatalogItem {
-	return {
-		name: model.id,
-		provider,
-		model_type: "llm",
-		...(model.name ? { display_name: model.name } : {}),
-		...(model.contextLimit ? { context_limit: model.contextLimit } : {}),
-		...(model.maxOutputTokens
-			? { max_output_tokens: model.maxOutputTokens }
-			: {}),
-		...(typeof model.supportsThinking === "boolean"
-			? { supports_thinking: model.supportsThinking }
-			: { supports_thinking: true }),
-		...(model.supportsThinking === false
-			? {}
-			: { thinking_controls: effortThinkingControls() }),
-	};
-}
-
-function effortThinkingControls(): NonNullable<
-	ModelCatalogItem["thinking_controls"]
-> {
-	return {
-		supported: true,
-		allowed_fields: ["effort"],
-		defaults_only: false,
-	};
 }
 
 function parseMetadata(

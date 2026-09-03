@@ -1,9 +1,6 @@
 import { canonicalToolName } from "../core/tools/names.ts";
 import { ToolPolicy } from "../core/tools/ToolPolicy.ts";
-import {
-	BUILTIN_PROVIDER_REGISTRY,
-	type ProviderRegistry,
-} from "../providers/byok/registry.ts";
+import type { ProviderRegistry } from "../providers/byok/registry.ts";
 import {
 	type AuthState,
 	hasAnyCredentials,
@@ -478,7 +475,7 @@ export class Config {
 	}
 
 	get providerRegistry(): ProviderRegistry {
-		return this.auth.providerRegistry ?? BUILTIN_PROVIDER_REGISTRY;
+		return this.auth.providerRegistry;
 	}
 
 	hasProviderKeyFor(provider: string): boolean {

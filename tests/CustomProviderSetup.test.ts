@@ -9,8 +9,10 @@ import { makeInkTty } from "./inkHarness.ts";
 const ESC = String.fromCharCode(27);
 const KEY = {
 	down: `${ESC}[B`,
+	up: `${ESC}[A`,
 	enter: String.fromCharCode(13),
 };
+const TRACE_REFERENCE = "$" + "{TRACE_ID}";
 
 const sleep = (ms = 25): Promise<void> =>
 	new Promise((resolve) => setTimeout(resolve, ms));
@@ -86,7 +88,23 @@ describe("CustomProviderSetup", () => {
 			KEY.enter,
 			KEY.enter,
 			KEY.enter,
+			"local-model",
 			KEY.enter,
+			KEY.down,
+			KEY.enter,
+			KEY.enter,
+			"X-Trace",
+			KEY.enter,
+			TRACE_REFERENCE,
+			KEY.enter,
+			KEY.down,
+			KEY.enter,
+			KEY.enter,
+			"temperature",
+			KEY.enter,
+			"0.2",
+			KEY.enter,
+			KEY.down,
 			KEY.enter,
 			KEY.enter,
 		);
@@ -100,9 +118,9 @@ describe("CustomProviderSetup", () => {
 				baseUrl: "http://localhost:8000/v1",
 				auth: { type: "none" },
 				discoverModels: true,
-				headers: {},
-				extraArgs: {},
-				models: [],
+				headers: { "X-Trace": TRACE_REFERENCE },
+				extraArgs: { temperature: 0.2 },
+				models: [{ id: "local-model" }],
 			},
 			key: undefined,
 			previousId: undefined,
@@ -143,8 +161,12 @@ describe("CustomProviderSetup", () => {
 			KEY.enter,
 			KEY.enter,
 			KEY.enter,
+			KEY.down,
 			KEY.enter,
-			'{"X-Auth":"header-secret-token"}',
+			KEY.enter,
+			"X-Auth",
+			KEY.enter,
+			"header-secret-token",
 		);
 		await sleep();
 
@@ -158,6 +180,21 @@ describe("CustomProviderSetup", () => {
 			name: "Legacy",
 			protocol: "openai-chat",
 			baseUrl: "https://models.example/v1",
+			models: [
+				{
+					id: "legacy-model",
+					contextLimit: 128000,
+					supportsThinking: true,
+					extraArgs: { reasoning_effort: "high" },
+				},
+			],
+			headers: { "X-Trace": TRACE_REFERENCE },
+			extraArgs: {
+				temperature: 0.25,
+				booleanText: "true",
+				numberText: "123",
+				nested: { enabled: true },
+			},
 		});
 		await sleep();
 		await ui.send(
@@ -168,8 +205,21 @@ describe("CustomProviderSetup", () => {
 			KEY.enter,
 			KEY.enter,
 			KEY.enter,
+			KEY.up,
+			KEY.enter,
+			"-renamed",
+			KEY.enter,
+			KEY.down,
+			KEY.down,
+			KEY.enter,
+			KEY.down,
 			KEY.enter,
 			KEY.enter,
+			"top_p",
+			KEY.enter,
+			"0.9",
+			KEY.enter,
+			KEY.down,
 			KEY.enter,
 			KEY.enter,
 		);
@@ -177,6 +227,24 @@ describe("CustomProviderSetup", () => {
 
 		expect(ui.saved()?.definition.auth).toEqual({ type: "apiKey" });
 		expect(ui.saved()?.previousId).toBe("legacy");
+		expect(ui.saved()?.definition.models).toEqual([
+			{
+				id: "legacy-model-renamed",
+				contextLimit: 128000,
+				supportsThinking: true,
+				extraArgs: { reasoning_effort: "high" },
+			},
+		]);
+		expect(ui.saved()?.definition.headers).toEqual({
+			"X-Trace": TRACE_REFERENCE,
+		});
+		expect(ui.saved()?.definition.extraArgs).toEqual({
+			temperature: 0.25,
+			booleanText: "true",
+			numberText: "123",
+			nested: { enabled: true },
+			top_p: 0.9,
+		});
 		ui.unmount();
 	});
 });

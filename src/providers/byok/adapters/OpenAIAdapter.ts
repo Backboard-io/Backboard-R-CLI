@@ -197,8 +197,17 @@ async function* streamOpenAI(
 	if (request.cacheKey && options.id === "openai") {
 		body.prompt_cache_key = request.cacheKey;
 	}
-	if (request.maxOutputTokens ?? modelConfig?.maxOutputTokens) {
-		body.max_tokens = request.maxOutputTokens ?? modelConfig?.maxOutputTokens;
+	const maxOutputTokens =
+		request.maxOutputTokens ?? modelConfig?.maxOutputTokens;
+	if (maxOutputTokens) {
+		if (
+			modelConfig?.supportsThinking === true ||
+			/^(?:gpt-5|o[1-9])(?:$|[-.])/i.test(request.model)
+		) {
+			body.max_completion_tokens = maxOutputTokens;
+		} else {
+			body.max_tokens = maxOutputTokens;
+		}
 	}
 	const effort = thinkingEffort(request.thinking);
 	// Only sent when thinking was actually requested: non-reasoning models

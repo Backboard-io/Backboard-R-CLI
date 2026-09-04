@@ -104,6 +104,7 @@ function parseProvider(value: JsonValue): CustomProviderDefinition | null {
 	if (typeof value.enabled === "boolean") provider.enabled = value.enabled;
 	const auth = parseAuth(value.auth);
 	const headers = stringRecord(value.headers);
+	if (value.headers !== undefined && headers === null) return null;
 	if (usesCredentials(auth, headers) && !isSecureProviderUrl(value.baseUrl)) {
 		return null;
 	}

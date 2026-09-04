@@ -12,6 +12,7 @@
  * Opt-in; never part of `bun test`. Costs a few tokens per model.
  */
 import { Config } from "../src/config/Config.ts";
+import { BYOK_PROVIDER_IDS } from "../src/core/keys/ProviderKeyTypes.ts";
 import { ToolRegistry } from "../src/core/tools/ToolRegistry.ts";
 import { BackboardClient } from "../src/providers/backboard/BackboardClient.ts";
 import type { ModelCatalogItem } from "../src/providers/backboard/types.ts";
@@ -30,12 +31,7 @@ config.enableBrowserUse();
 const router = createAgentClient(config);
 await Promise.all(
 	config.auth.providerKeys
-		.filter(
-			({ provider }) =>
-				!filter ||
-				provider.includes(filter) ||
-				config.modelString.includes(filter),
-		)
+		.filter(({ provider }) => !filter || provider.includes(filter))
 		.map(async ({ provider, key }) => {
 			try {
 				const adapter = config.providerRegistry.get(provider);
@@ -177,8 +173,11 @@ if (backboard) {
 	const server = catalog.filter((m) => m.source !== "byok");
 	const providers = new Set(server.map((m) => m.provider));
 	// The merged catalog hides Backboard's own route for providers you also hold a key for.
-	for (const provider of [...new Set(byok.map((m) => m.provider))])
-		providers.add(provider);
+	for (const provider of BYOK_PROVIDER_IDS) {
+		if (byok.some((model) => model.provider === provider)) {
+			providers.add(provider);
+		}
+	}
 	for (const provider of providers) {
 		if (SKIP.test(provider)) continue;
 		const model =

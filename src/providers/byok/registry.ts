@@ -6,7 +6,6 @@ import type { StoredProviderKey } from "../../core/keys/ProviderKeyTypes.ts";
 import {
 	type BuiltinProviderId,
 	BYOK_PROVIDER_IDS,
-	type ByokProviderId,
 } from "../../core/keys/ProviderKeyTypes.ts";
 import { anthropicAdapter } from "./adapters/AnthropicAdapter.ts";
 import { createCustomProviderAdapter } from "./adapters/CustomProviderAdapter.ts";
@@ -99,25 +98,6 @@ export class ProviderRegistry {
 		if (auth.type === "env") return env[auth.variable]?.trim() || null;
 		return saved?.enabled ? saved.key : null;
 	}
-
-	hasCredential(
-		id: string,
-		saved: StoredProviderKey | undefined,
-		env: NodeJS.ProcessEnv = process.env,
-	): boolean {
-		return this.credentialFor(id, saved, env) !== null;
-	}
 }
 
 export const BUILTIN_PROVIDER_REGISTRY = new ProviderRegistry();
-
-export function byokAdapter(id: ByokProviderId): ProviderAdapter {
-	const adapter = BUILTIN_PROVIDER_REGISTRY.get(id);
-	if (!adapter) throw new Error(`Unknown provider: ${id}`);
-	return adapter;
-}
-
-/** Backward-compatible built-in lookup. Dynamic callers use ProviderRegistry. */
-export function byokAdapterFor(provider: string): ProviderAdapter | null {
-	return BUILTIN_PROVIDER_REGISTRY.get(provider);
-}

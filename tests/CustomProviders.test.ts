@@ -90,6 +90,18 @@ describe("custom provider configuration", () => {
 						modelsPath: "http://catalog.example/models",
 					},
 					{
+						id: "malformed-headers",
+						name: "Malformed Headers",
+						protocol: "openai-chat",
+						baseUrl: "http://remote.example/v1",
+						auth: { type: "none" },
+						headers: {
+							Authorization: `Bearer ${TRACE_REFERENCE}`,
+							"X-Valid": "kept",
+							"X-Invalid": 123,
+						},
+					},
+					{
 						id: "openai",
 						name: "Reserved",
 						protocol: "openai-chat",
@@ -130,6 +142,7 @@ describe("custom provider configuration", () => {
 			"insecure",
 			"insecure-header",
 			"insecure-catalog",
+			"malformed-headers",
 			"openai",
 			"BAD ID",
 		]);
@@ -517,6 +530,67 @@ describe("custom provider adapters", () => {
 			},
 			{ id: "call_2", name: "read", input: { path: "two.txt" } },
 		]);
+	});
+
+	it("uses the supported output-token field for reasoning models", async () => {
+		const bodies: Record<string, unknown>[] = [];
+		globalThis.fetch = (async (_url: string, init?: RequestInit) => {
+			bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+			return new Response(
+				'data: {"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n',
+				{ status: 200 },
+			);
+		}) as unknown as typeof fetch;
+		const reasoning = createOpenAIChatAdapter({
+			id: "reasoning",
+			label: "Reasoning",
+			baseUrl: "https://models.example/v1",
+			requiresKey: false,
+			discoverModels: false,
+			models: [
+				{
+					id: "gpt-5-test",
+					supportsThinking: true,
+					maxOutputTokens: 64,
+				},
+			],
+		});
+		const legacy = createOpenAIChatAdapter({
+			id: "legacy",
+			label: "Legacy",
+			baseUrl: "https://models.example/v1",
+			requiresKey: false,
+			discoverModels: false,
+			models: [
+				{
+					id: "legacy-chat",
+					supportsThinking: false,
+					maxOutputTokens: 32,
+				},
+			],
+		});
+		const request = {
+			systemPrompt: "system",
+			tools: [],
+			messages: [{ role: "user" as const, content: "hello" }],
+		};
+
+		await collect(
+			reasoning.stream(
+				{
+					...request,
+					model: "gpt-5-test",
+					thinking: { effort: "high" },
+				},
+				"",
+			),
+		);
+		await collect(legacy.stream({ ...request, model: "legacy-chat" }, ""));
+
+		expect(bodies[0]).toMatchObject({ max_completion_tokens: 64 });
+		expect(bodies[0]).not.toHaveProperty("max_tokens");
+		expect(bodies[1]).toMatchObject({ max_tokens: 32 });
+		expect(bodies[1]).not.toHaveProperty("max_completion_tokens");
 	});
 
 	it("replays OpenAI-compatible signed tool calls", () => {

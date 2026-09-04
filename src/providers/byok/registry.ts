@@ -1,4 +1,7 @@
-import type { CustomProviderDefinition } from "../../config/providers.ts";
+import {
+	type CustomProviderDefinition,
+	RESERVED_CUSTOM_PROVIDER_IDS,
+} from "../../config/providers.ts";
 import type { StoredProviderKey } from "../../core/keys/ProviderKeyTypes.ts";
 import {
 	type BuiltinProviderId,
@@ -27,11 +30,7 @@ export const BYOK_ADAPTERS: Record<BuiltinProviderId, ProviderAdapter> = {
 /** Adapters in a stable display order for pickers. */
 export const BYOK_ADAPTER_LIST: readonly ProviderAdapter[] =
 	BYOK_PROVIDER_IDS.map((id) => BYOK_ADAPTERS[id]);
-export const RESERVED_PROVIDER_IDS: ReadonlySet<string> = new Set([
-	...BYOK_PROVIDER_IDS,
-	"gemini",
-	"google-gemini",
-]);
+export const RESERVED_PROVIDER_IDS = RESERVED_CUSTOM_PROVIDER_IDS;
 
 export class ProviderRegistry {
 	readonly adapters: readonly ProviderAdapter[];

@@ -177,7 +177,7 @@ export function CustomProviderSetup({
 				setDraft((current) => ({
 					...current,
 					authType,
-					credential: "",
+					credential: authType === current.authType ? current.credential : "",
 				}));
 				setStep(authType === "none" ? 6 : 5);
 				setChoiceIndex(0);

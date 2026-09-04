@@ -1,7 +1,10 @@
 import { describe, expect, it } from "bun:test";
 import { fetchModels } from "../src/providers/backboard/models.ts";
 import type { ModelsListResponse } from "../src/providers/backboard/types.ts";
-import { refreshCredentials } from "../src/ui/utils/refreshCredentials.ts";
+import {
+	refreshCredentials,
+	shouldAdoptPersistedModel,
+} from "../src/ui/utils/refreshCredentials.ts";
 
 describe("refreshCredentials", () => {
 	it("reloads auth and invalidates the model catalog cache", async () => {
@@ -63,5 +66,15 @@ describe("refreshCredentials", () => {
 		await fetchModels(client);
 
 		expect(catalogLoads).toBe(2);
+	});
+
+	it("does not replace an explicit --model selection with persisted state", () => {
+		const persisted = { provider: "saved", model: "saved-model" };
+		expect(
+			shouldAdoptPersistedModel("cli/cli-model", "cli/cli-model", persisted),
+		).toBe(false);
+		expect(
+			shouldAdoptPersistedModel(undefined, "cli/cli-model", persisted),
+		).toBe(true);
 	});
 });

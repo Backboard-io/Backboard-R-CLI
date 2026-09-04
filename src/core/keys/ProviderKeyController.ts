@@ -6,6 +6,7 @@ import {
 import {
 	type CustomProviderDefinition,
 	normalizeCustomProviderDefinition,
+	normalizeProviderId,
 } from "../../config/providers.ts";
 import { ByokError } from "../../providers/byok/ByokError.ts";
 import {
@@ -184,12 +185,13 @@ export class ProviderKeyController {
 		previousId?: string,
 		signal?: AbortSignal,
 	): Promise<void> {
-		const candidate = normalizeCustomProviderDefinition(definition);
-		if (RESERVED_PROVIDER_IDS.has(candidate.id)) {
+		const requestedId = normalizeProviderId(definition.id);
+		if (RESERVED_PROVIDER_IDS.has(requestedId)) {
 			throw new Error(
-				`Provider id "${candidate.id}" is reserved for a built-in provider.`,
+				`Provider id "${requestedId}" is reserved for a built-in provider.`,
 			);
 		}
+		const candidate = normalizeCustomProviderDefinition(definition);
 		const existing = this.customProviders();
 		const duplicate = existing.find(
 			(entry) => entry.id === candidate.id && entry.id !== previousId,
@@ -293,17 +295,17 @@ export class ProviderKeyController {
 			{
 				...config,
 				providers: next,
-				...((!config.model || !currentModelReachable) && models[0]
-					? { model: { provider: definition.id, model: models[0] } }
-					: config.model?.provider === previousId && models[0]
-						? {
-								model: {
-									provider: definition.id,
-									model: models.includes(config.model.model)
-										? config.model.model
-										: models[0],
-								},
-							}
+				...(config.model?.provider === previousId && models[0]
+					? {
+							model: {
+								provider: definition.id,
+								model: models.includes(config.model.model)
+									? config.model.model
+									: models[0],
+							},
+						}
+					: (!config.model || !currentModelReachable) && models[0]
+						? { model: { provider: definition.id, model: models[0] } }
 						: {}),
 			},
 			this.options.homeDir,

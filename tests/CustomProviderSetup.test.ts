@@ -247,4 +247,22 @@ describe("CustomProviderSetup", () => {
 		});
 		ui.unmount();
 	});
+
+	it("keeps the environment variable name when editing env authentication", async () => {
+		const ui = mount({
+			id: "env-provider",
+			name: "Environment Provider",
+			protocol: "openai-chat",
+			baseUrl: "https://models.example/v1",
+			auth: { type: "env", variable: "EXISTING_PROVIDER_KEY" },
+			discoverModels: false,
+			models: [{ id: "test-model" }],
+		});
+		await sleep();
+		await ui.send(KEY.enter, KEY.enter, KEY.enter, KEY.enter, KEY.enter);
+		await sleep();
+
+		expect(ui.written()).toContain("EXISTING_PROVIDER_KEY");
+		ui.unmount();
+	});
 });

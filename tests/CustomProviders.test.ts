@@ -45,7 +45,7 @@ async function collect(
 }
 
 describe("custom provider configuration", () => {
-	it("round-trips valid definitions and isolates malformed entries", async () => {
+	it("round-trips valid definitions without deleting malformed entries", async () => {
 		const dir = await home();
 		await Bun.write(
 			path.join(dir, ".backboard", "config.json"),
@@ -89,6 +89,13 @@ describe("custom provider configuration", () => {
 						auth: { type: "apiKey" },
 						modelsPath: "http://catalog.example/models",
 					},
+					{
+						id: "openai",
+						name: "Reserved",
+						protocol: "openai-chat",
+						baseUrl: "http://localhost:8002",
+						auth: { type: "none" },
+					},
 					{ id: "BAD ID", name: "Bad", protocol: "wat", baseUrl: "file:///x" },
 				],
 			}),
@@ -111,6 +118,61 @@ describe("custom provider configuration", () => {
 				],
 			},
 		]);
+		await saveBackboardConfig(
+			{ ...readBackboardConfig(dir), notify: true },
+			dir,
+		);
+		const raw = (await Bun.file(
+			path.join(dir, ".backboard", "config.json"),
+		).json()) as { providers: Array<{ id: string }> };
+		expect(raw.providers.map((provider) => provider.id)).toEqual([
+			"local-provider",
+			"insecure",
+			"insecure-header",
+			"insecure-catalog",
+			"openai",
+			"BAD ID",
+		]);
+		const openAIStatus = new ProviderKeyController({ homeDir: dir })
+			.list()
+			.find((status) => status.provider === "openai");
+		expect(openAIStatus?.custom).toBeUndefined();
+		expect(openAIStatus?.configured).toBe(false);
+	});
+
+	it("preserves the selected model when editing a disabled provider", async () => {
+		const dir = await home();
+		const provider = {
+			id: "disabled-provider",
+			name: "Disabled Provider",
+			protocol: "openai-chat" as const,
+			baseUrl: "http://localhost:8317/v1",
+			enabled: false,
+			auth: { type: "none" as const },
+			discoverModels: false,
+			models: [{ id: "fallback-model" }, { id: "selected-model" }],
+		};
+		await saveBackboardConfig(
+			{
+				providers: [provider],
+				model: {
+					provider: provider.id,
+					model: "selected-model",
+				},
+			},
+			dir,
+		);
+
+		await new ProviderKeyController({ homeDir: dir }).saveCustomProvider(
+			provider,
+			undefined,
+			provider.id,
+		);
+
+		expect(readBackboardConfig(dir).model).toEqual({
+			provider: provider.id,
+			model: "selected-model",
+		});
 	});
 
 	it("joins standard and absolute provider endpoints safely", () => {

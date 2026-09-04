@@ -38,6 +38,14 @@ export interface CustomProviderDefinition {
 }
 
 const PROVIDER_ID_PATTERN = /^[a-z0-9][a-z0-9._-]{0,63}$/;
+export const RESERVED_CUSTOM_PROVIDER_IDS: ReadonlySet<string> = new Set([
+	"anthropic",
+	"openai",
+	"google",
+	"openrouter",
+	"gemini",
+	"google-gemini",
+]);
 
 export function normalizeProviderId(value: string): string {
 	return value.trim().toLowerCase();
@@ -86,6 +94,7 @@ function parseProvider(value: JsonValue): CustomProviderDefinition | null {
 		return null;
 	}
 	const id = normalizeProviderId(value.id);
+	if (RESERVED_CUSTOM_PROVIDER_IDS.has(id)) return null;
 	const provider: CustomProviderDefinition = {
 		id,
 		name: value.name.trim(),

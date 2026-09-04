@@ -158,7 +158,10 @@ import type { PromptHistoryState, QueuedPromptItem } from "./input/types.ts";
 import { playCompletionNotification } from "./notify.ts";
 import { theme } from "./theme/theme.ts";
 import { composeSubmissionWithNotes } from "./utils/modelNotes.ts";
-import { refreshCredentials as refreshClientCredentials } from "./utils/refreshCredentials.ts";
+import {
+	refreshCredentials as refreshClientCredentials,
+	shouldAdoptPersistedModel,
+} from "./utils/refreshCredentials.ts";
 import {
 	activateResumeTarget,
 	hydrateResumeTarget,
@@ -310,7 +313,13 @@ export function App({
 		const wasExpert = config.isExpertModeEnabled;
 		refreshClientCredentials(config, client);
 		const persistedModel = readBackboardConfig().model;
-		if (persistedModel && formatModel(persistedModel) !== config.modelString) {
+		if (
+			shouldAdoptPersistedModel(
+				config.flags.model,
+				config.modelString,
+				persistedModel,
+			)
+		) {
 			config.setModel(persistedModel);
 			agent.setModelLabel(formatModel(persistedModel));
 		} else if (!config.hasBackendForCurrentModel) {

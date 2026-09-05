@@ -1,11 +1,6 @@
-import {
-	enabledProviderKeys,
-	readProviderKeys,
-} from "../core/keys/ProviderKeyStore.ts";
-import type {
-	ByokProviderId,
-	ResolvedProviderKey,
-} from "../core/keys/ProviderKeyTypes.ts";
+import { readProviderKeys } from "../core/keys/ProviderKeyStore.ts";
+import type { ResolvedProviderKey } from "../core/keys/ProviderKeyTypes.ts";
+import { ProviderRegistry } from "../providers/byok/registry.ts";
 import { readBackboardConfig } from "./backboardConfig.ts";
 import { type BackboardEnv, resolveApiUrl } from "./env.ts";
 
@@ -31,6 +26,7 @@ export interface AuthState {
 	backboard: BackboardEnv | null;
 	/** Saved provider keys that are currently toggled on. */
 	providerKeys: ResolvedProviderKey[];
+	providerRegistry: ProviderRegistry;
 }
 
 export interface ResolveAuthOptions {
@@ -43,12 +39,19 @@ export function resolveAuth(options: ResolveAuthOptions = {}): AuthState {
 	const apiKey = isUsableApiKey(envApiKey) ? envApiKey : fileConfig.apiKey;
 	const apiUrl = resolveApiUrl(fileConfig.apiUrl);
 
+	const providerRegistry = new ProviderRegistry(fileConfig.providers ?? []);
+	const savedKeys = readProviderKeys(options.homeDir);
+	const providerKeys = providerRegistry.adapters.flatMap((adapter) => {
+		const key = providerRegistry.credentialFor(
+			adapter.id,
+			savedKeys[adapter.id],
+		);
+		return key === null ? [] : [{ provider: adapter.id, key }];
+	});
 	return {
 		backboard: apiKey ? { apiKey, apiUrl } : null,
-		// Env vars are deliberately not consulted: a provider key becomes usable
-		// only by being added through the BYOK flow or `/keys`, so what the CLI
-		// bills to is always something the user chose explicitly.
-		providerKeys: enabledProviderKeys(readProviderKeys(options.homeDir)),
+		providerKeys,
+		providerRegistry,
 	};
 }
 
@@ -59,7 +62,7 @@ export function hasAnyCredentials(auth: AuthState): boolean {
 /** Builds the provider -> key lookup `ByokClient` and `ClientRouter` use. */
 export function providerKeyResolver(
 	auth: AuthState,
-): (provider: ByokProviderId) => string | null {
+): (provider: string) => string | null {
 	const byProvider = new Map(
 		auth.providerKeys.map((entry) => [entry.provider, entry.key]),
 	);

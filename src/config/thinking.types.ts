@@ -14,6 +14,7 @@ export interface ThinkingControlsMetadata {
 	supported: boolean;
 	allowed_fields: string[];
 	defaults_only: boolean;
+	budget_policy?: "anthropicLegacy" | "google" | "generic";
 }
 
 export interface ThinkingModelMetadata {

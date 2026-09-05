@@ -40,6 +40,12 @@ describe("parseCommand", () => {
 		expect(parseCommand("/settings")).toEqual({ type: "settings" });
 	});
 
+	it("parses providers and keeps keys as an alias", () => {
+		expect(parseCommand("/providers")).toEqual({ type: "providers" });
+		expect(parseCommand("/keys")).toEqual({ type: "providers" });
+		expect(parseCommand("/apikeys")).toEqual({ type: "providers" });
+	});
+
 	it("resolves /config as an alias of settings", () => {
 		expect(parseCommand("/config")).toEqual({ type: "settings" });
 	});
@@ -115,6 +121,7 @@ describe("parseCommand", () => {
 			"cua",
 			"browser",
 			"discover",
+			"providers",
 		] as const) {
 			expect(canRunCommandAfterSessionEnd(type)).toBe(true);
 		}

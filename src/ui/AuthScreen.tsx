@@ -8,7 +8,7 @@ import type {
 	AuthScreenProps,
 } from "./AuthScreenTypes.ts";
 import { AuthPrompt } from "./components/AuthPrompt.tsx";
-import { ProviderKeySetup } from "./components/ProviderKeySetup.tsx";
+import { ProviderKeyManager } from "./components/ProviderKeyManager.tsx";
 import { Spinner } from "./components/Spinner.tsx";
 import { useResizeStabilizer } from "./hooks/useResizeStabilizer.ts";
 import { theme } from "./theme/theme.ts";
@@ -138,13 +138,17 @@ export function AuthScreen({
 		return (
 			<Box flexDirection="column">
 				<AuthPrompt selected={selected} columns={columns} />
-				<ProviderKeySetup
+				<ProviderKeyManager
 					controller={keys}
-					onDone={() => {
-						onKeySaved?.();
-						app.exit();
+					signedIn={false}
+					onClose={() => {
+						if (keys.list().some((provider) => provider.enabled)) {
+							onKeySaved?.();
+							app.exit();
+						} else {
+							setMode("select");
+						}
 					}}
-					onCancel={() => setMode("select")}
 				/>
 			</Box>
 		);

@@ -15,7 +15,7 @@ import type {
 
 const ACTIONS: Record<AuthPromptSelection, string> = {
 	login: "Login with Backboard",
-	byok: "Use my own API key",
+	byok: "Use my own model provider",
 	exit: "Exit",
 };
 
@@ -52,7 +52,7 @@ export function AuthPrompt({
 			</Box>
 			<Box flexDirection="column" marginTop={1} paddingX={1}>
 				<Text color={theme.accentBright}>
-					Sign in with Backboard, or bring your own provider API key.
+					Sign in with Backboard, or bring your own model provider.
 				</Text>
 				<Box flexDirection="column" marginTop={1}>
 					{Object.entries(ACTIONS).map(([key, label]) => {

@@ -82,6 +82,7 @@ function router(options: {
 	byokClient?: RecordingClient;
 	model?: { provider: string; model: string };
 	keyed?: string[];
+	custom?: string[];
 	signedIn?: boolean;
 }): ClientRouter {
 	return new ClientRouter({
@@ -97,6 +98,7 @@ function router(options: {
 			? {}
 			: { hasBackboardAuth: () => options.signedIn === true }),
 		hasKeyFor: (provider) => (options.keyed ?? []).includes(provider),
+		hasCustomProvider: (provider) => (options.custom ?? []).includes(provider),
 	});
 }
 
@@ -140,6 +142,17 @@ describe("ClientRouter precedence", () => {
 				keyed: ["cohere"],
 			}).sourceFor({ provider: "cohere", model: "command-a" }),
 		).toBe("backboard");
+	});
+
+	it("keeps unavailable custom providers on the BYOK backend", () => {
+		expect(
+			router({
+				backboardClient: backboard(),
+				byokClient: byok(),
+				custom: ["local"],
+				signedIn: true,
+			}).sourceFor({ provider: "local", model: "local-model" }),
+		).toBe("byok");
 	});
 
 	it("reports the active backend's capabilities", () => {

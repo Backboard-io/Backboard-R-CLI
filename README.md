@@ -129,21 +129,28 @@ For the complete first-session walkthrough, see the
 Backboard SSO into a separate application, see the
 [Backboard SSO integration guide](https://docs.backboard.io/concepts/sso).
 
-## Use your own model-provider keys
+## Use your own model providers
 
-A Backboard login is not required when you want to call a supported provider
+A Backboard login is not required when you want to call a model provider
 directly. On the authentication screen choose **Bring your own key**, or run:
 
 ```text
-/keys
+/providers
 ```
 
-R-CLI currently supports direct keys for:
+`/keys` remains an alias for `/providers`.
+
+R-CLI includes first-class direct integrations for:
 
 - Anthropic
 - OpenAI
 - Google
 - OpenRouter
+
+You can also add custom OpenAI Chat Completions, OpenAI Responses, and
+Anthropic Messages compatible endpoints. This covers most hosted gateways and
+local servers, including Ollama, LM Studio, vLLM, Together, Fireworks, Groq,
+and similar OpenAI-compatible services.
 
 Provider keys are validated before saving, encrypted at rest in
 `~/.backboard/keys.json`, and never written to project session logs. Add keys
@@ -153,6 +160,74 @@ files.
 You can keep both a Backboard login and provider keys. When the same provider
 is available through both, the enabled direct key takes precedence for that
 provider's models.
+
+### Custom model providers
+
+Use `/providers`, choose **Add custom provider**, and enter:
+
+- A stable provider ID and display name
+- The API protocol
+- A base URL
+- An encrypted API key, environment variable, or no authentication
+- Optional model discovery endpoint, manual models, headers, and request
+  arguments
+
+For an OpenAI-compatible local endpoint:
+
+```text
+Name: Local Provider
+ID: local-provider
+Protocol: OpenAI Chat Completions
+Base URL: http://localhost:8000/v1
+Authentication: No authentication
+Models endpoint: models
+```
+
+The connection is tested before saving. Discovered models then appear under
+the provider's own tab in `/model`. The provider manager also supports editing,
+re-testing, enabling/disabling, and removal.
+
+Advanced users can edit the non-secret definitions in
+`~/.backboard/config.json`:
+
+```json
+{
+  "providers": [
+    {
+      "id": "local-provider",
+      "name": "Local Provider",
+      "protocol": "openai-responses",
+      "baseUrl": "http://localhost:8000/v1",
+      "auth": { "type": "none" },
+      "headers": {
+        "X-Workspace": "${WORKSPACE_ID}"
+      },
+      "extraArgs": {
+        "temperature": 0.2
+      },
+      "models": [
+        {
+          "id": "gpt-5.6-sol",
+          "contextLimit": 400000,
+          "maxOutputTokens": 32768,
+          "supportsThinking": true
+        }
+      ]
+    }
+  ]
+}
+```
+
+Set `"discoverModels": false` for an endpoint without `GET /models`; manual
+models are then required. `modelsPath` may be a relative path or full URL.
+String values in `baseUrl`, `modelsPath`, `headers`, `extraArgs`, and
+model-level `extraArgs` support `${ENV_VAR}` references. Missing variables fail
+clearly without sending the literal placeholder.
+
+This compatibility layer targets OpenAI-compatible and Anthropic-compatible
+HTTP APIs. Provider-native authentication such as AWS SigV4, cloud SDK
+credential chains, and provider-specific OAuth requires a dedicated
+integration.
 
 ## Start your first session
 
@@ -288,7 +363,7 @@ Type `/help` inside R-CLI for the authoritative command list.
 | --------------------------- | ------------------------------------------ |
 | `/model`                    | Choose a model and thinking mode           |
 | `/settings`                 | Adjust session preferences                 |
-| `/keys`                     | Manage direct provider API keys            |
+| `/providers`, `/keys`       | Manage model providers and credentials      |
 | `/sessions`, `/session`     | Browse Backboard and local BYOK sessions   |
 | `/resume SESSION_ID`        | Resume a session directly by ID            |
 | `/context`                  | Inspect context-window usage               |

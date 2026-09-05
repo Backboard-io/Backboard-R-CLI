@@ -1,6 +1,6 @@
 import os from "node:os";
 import {
-	deleteBackboardConfig,
+	clearBackboardCredential,
 	readBackboardConfig,
 	saveBackboardConfig,
 } from "../../config/backboardConfig.ts";
@@ -36,6 +36,7 @@ export async function loginWithBackboardSso(
 		);
 	}
 	const configPath = await saveBackboardConfig({
+		...readBackboardConfig(),
 		apiKey,
 		apiUrl,
 	});
@@ -55,7 +56,7 @@ function canOpenBrowser(): boolean {
 }
 
 export async function logoutSavedCredentials(): Promise<string> {
-	const result = await deleteBackboardConfig();
+	const result = await clearBackboardCredential();
 	const message = result.removed
 		? `Signed out. Removed saved credentials from ${result.path}.`
 		: `No saved Backboard credentials found at ${result.path}.`;

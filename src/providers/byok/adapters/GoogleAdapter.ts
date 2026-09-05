@@ -208,7 +208,10 @@ async function* streamGoogle(
 					// the next request if the call comes back unsigned, so the token
 					// has to survive the round-trip through the transcript.
 					...(entry.thoughtSignature
-						? { signature: entry.thoughtSignature }
+						? {
+								signature: entry.thoughtSignature,
+								signatureProvider: "google",
+							}
 						: {}),
 				};
 				calls.push(call);
@@ -354,7 +357,10 @@ export function renderGoogleContents(
 						args: call.input ?? {},
 						...(isProviderCallId(call.id) ? { id: call.id } : {}),
 					},
-					...(call.signature ? { thoughtSignature: call.signature } : {}),
+					...(call.signature &&
+					(!call.signatureProvider || call.signatureProvider === "google")
+						? { thoughtSignature: call.signature }
+						: {}),
 				});
 			}
 			if (parts.length > 0) out.push({ role: "model", parts });

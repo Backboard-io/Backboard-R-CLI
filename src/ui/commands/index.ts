@@ -14,7 +14,7 @@ export type Command =
 	| { type: "browser" }
 	| { type: "lsp" }
 	| { type: "mcp" }
-	| { type: "keys" }
+	| { type: "providers" }
 	| { type: "context" }
 	| { type: "compress" }
 	| { type: "discover" }
@@ -93,10 +93,10 @@ export const SLASH_COMMANDS: readonly SlashCommandDefinition[] = [
 		aliases: ["compact"],
 	},
 	{
-		name: "keys",
-		type: "keys",
-		description: "Manage provider API keys (BYOK)",
-		aliases: ["apikeys"],
+		name: "providers",
+		type: "providers",
+		description: "Manage model providers and credentials",
+		aliases: ["keys", "apikeys"],
 	},
 	{
 		name: "discover",
@@ -229,7 +229,7 @@ export function canRunCommandAfterSessionEnd(
 		command === "login" ||
 		command === "logout" ||
 		command === "memory" ||
-		command === "keys" ||
+		command === "providers" ||
 		command === "context" ||
 		command === "settings" ||
 		command === "cua" ||

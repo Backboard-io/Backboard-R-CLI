@@ -79,6 +79,23 @@ describe("thinking config", () => {
 		).toEqual({ max_tokens: 8192 });
 	});
 
+	it("uses provider-supplied budget policies for custom provider ids", () => {
+		expect(
+			resolveThinking({
+				intent: { kind: "level", level: "medium" },
+				model: { provider: "custom-anthropic", model: "claude-sonnet-4-5" },
+				metadata: metadata(["budget_tokens"], {
+					thinking_controls: {
+						supported: true,
+						allowed_fields: ["budget_tokens"],
+						defaults_only: false,
+						budget_policy: "anthropicLegacy",
+					},
+				}),
+			}),
+		).toEqual({ budget_tokens: 8192 });
+	});
+
 	it("routes numeric budgets only to token fields", () => {
 		expect(
 			resolveThinking({

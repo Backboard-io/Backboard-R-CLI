@@ -72,7 +72,9 @@ export function resolveThinking(
 		);
 	}
 	const budget = resolveBudget(
-		profile?.budgetPolicyId ?? "generic",
+		metadata?.thinking_controls?.budget_policy ??
+			profile?.budgetPolicyId ??
+			"generic",
 		intent.level,
 		{
 			field: tokenField,

@@ -18,7 +18,7 @@ import type {
 	SendMessageRequest,
 	SubmitToolOutputsRequest,
 } from "./backboard/types.ts";
-import { byokAdapterFor } from "./byok/registry.ts";
+import { BUILTIN_PROVIDER_REGISTRY } from "./byok/registry.ts";
 
 export type ClientSource = "byok" | "backboard";
 
@@ -35,6 +35,10 @@ export interface ClientRouterDeps {
 	hasBackboardAuth?: () => boolean;
 	/** True when an enabled saved key can serve this provider. */
 	hasKeyFor: (provider: string) => boolean;
+	/** True when the live provider registry can serve this provider id. */
+	hasProvider?: (provider: string) => boolean;
+	/** True when the provider id belongs to a user-defined provider. */
+	hasCustomProvider?: (provider: string) => boolean;
 }
 
 export class BackendUnavailableError extends Error {
@@ -63,9 +67,13 @@ export class ClientRouter implements AgentClient {
 
 	/** Which backend owns a given model, honouring key-over-SSO precedence. */
 	sourceFor(model: ModelRef = this.deps.getModel()): ClientSource {
+		if (this.deps.byok && this.deps.hasCustomProvider?.(model.provider)) {
+			return "byok";
+		}
 		if (
 			this.deps.byok &&
-			byokAdapterFor(model.provider) &&
+			(this.deps.hasProvider?.(model.provider) ??
+				BUILTIN_PROVIDER_REGISTRY.get(model.provider) !== null) &&
 			this.deps.hasKeyFor(model.provider)
 		) {
 			return "byok";

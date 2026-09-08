@@ -31,7 +31,10 @@ import type {
 	ByokMessage,
 	ProviderAdapter,
 } from "./ByokTypes.ts";
-import { BYOK_ADAPTER_LIST, byokAdapterFor } from "./registry.ts";
+import {
+	BUILTIN_PROVIDER_REGISTRY,
+	type ProviderRegistry,
+} from "./registry.ts";
 
 /** Resolves the usable key for a provider, or null when none is enabled. */
 export type ProviderKeyResolver = (provider: ByokProviderId) => string | null;
@@ -113,6 +116,8 @@ export class ByokClient implements AgentClient {
 		private readonly resolveKey: ProviderKeyResolver,
 		private readonly serverLog?: ServerEventLog,
 		private readonly conversationStore?: ByokConversationStore,
+		private readonly resolveRegistry: () => ProviderRegistry = () =>
+			BUILTIN_PROVIDER_REGISTRY,
 	) {}
 
 	async *runMessage(
@@ -491,22 +496,26 @@ export class ByokClient implements AgentClient {
 		provider: string,
 		model: string,
 	): Promise<ModelThinkingMetadataResponse> {
-		const adapter = byokAdapterFor(provider);
+		const adapter = this.resolveRegistry().get(provider);
+		const supportsThinking = adapter
+			? await adapter.supportsThinking(model, this.keyFor(adapter))
+			: false;
 		return {
 			provider,
 			model,
-			supports_thinking: adapter
-				? await adapter.supportsThinking(model, this.keyFor(adapter))
-				: false,
+			supports_thinking: supportsThinking,
+			...(supportsThinking && adapter?.thinkingControls
+				? { thinking_controls: adapter.thinkingControls(model) }
+				: {}),
 		};
 	}
 
 	/** Every model reachable with a currently enabled key. */
 	async listModels(options: RequestOptions = {}): Promise<ModelsListResponse> {
 		const results = await Promise.all(
-			BYOK_ADAPTER_LIST.map(async (adapter) => {
+			this.resolveRegistry().adapters.map(async (adapter) => {
 				const key = this.resolveKey(adapter.id);
-				if (!key) return [];
+				if (key === null) return [];
 				try {
 					return await adapter.listModels(key, options.signal);
 				} catch {
@@ -696,10 +705,10 @@ export class ByokClient implements AgentClient {
 	}
 
 	private adapterFor(provider: string | undefined): ProviderAdapter {
-		const adapter = provider ? byokAdapterFor(provider) : null;
+		const adapter = provider ? this.resolveRegistry().get(provider) : null;
 		if (!adapter) {
 			throw new Error(
-				`No API key provider handles "${provider ?? "unknown"}". Run /keys to add one, or sign in with Backboard for the full catalog.`,
+				`No API key provider handles "${provider ?? "unknown"}". Run /providers to add a custom provider, or sign in with Backboard for the full catalog.`,
 			);
 		}
 		return adapter;
@@ -707,9 +716,9 @@ export class ByokClient implements AgentClient {
 
 	private keyFor(adapter: ProviderAdapter): string {
 		const key = this.resolveKey(adapter.id);
-		if (!key) {
+		if (key === null) {
 			throw new Error(
-				`No enabled ${adapter.label} API key. Add or enable one with /keys.`,
+				`No enabled ${adapter.label} API key or credential. Add or enable one with /providers.`,
 			);
 		}
 		return key;

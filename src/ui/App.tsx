@@ -9,6 +9,7 @@ import {
 	useRef,
 	useState,
 } from "react";
+import { readBackboardConfig } from "../config/backboardConfig.ts";
 import { APP_DISPLAY_NAME, APP_VERSION } from "../config/branding.ts";
 import type { Config } from "../config/Config.ts";
 import { formatModel } from "../config/defaults.ts";
@@ -157,7 +158,10 @@ import type { PromptHistoryState, QueuedPromptItem } from "./input/types.ts";
 import { playCompletionNotification } from "./notify.ts";
 import { theme } from "./theme/theme.ts";
 import { composeSubmissionWithNotes } from "./utils/modelNotes.ts";
-import { refreshCredentials as refreshClientCredentials } from "./utils/refreshCredentials.ts";
+import {
+	refreshCredentials as refreshClientCredentials,
+	shouldAdoptPersistedModel,
+} from "./utils/refreshCredentials.ts";
 import {
 	activateResumeTarget,
 	hydrateResumeTarget,
@@ -308,6 +312,23 @@ export function App({
 	const refreshCredentials = useCallback((): void => {
 		const wasExpert = config.isExpertModeEnabled;
 		refreshClientCredentials(config, client);
+		const persistedModel = readBackboardConfig().model;
+		if (
+			shouldAdoptPersistedModel(
+				config.flags.model,
+				config.modelString,
+				persistedModel,
+			)
+		) {
+			config.setModel(persistedModel);
+			agent.setModelLabel(formatModel(persistedModel));
+		} else if (!config.hasBackendForCurrentModel) {
+			agent.notice(
+				"Choose another model because the selected provider is no longer enabled.",
+				"warning",
+			);
+			setMode("model");
+		}
 		if (wasExpert && !config.isExpertModeEnabled) {
 			agent.notice(
 				"Expert mode is off: its model's provider key is no longer enabled.",
@@ -316,7 +337,7 @@ export function App({
 		}
 		setModels([]);
 	}, [agent, config, client]);
-	// Every `/keys` change re-reads credentials into the live Config, so the
+	// Every `/providers` change re-reads credentials into the live Config, so the
 	// next request routes through the new key set without a restart. The model
 	// list is dropped because which models exist depends on those keys.
 	const providerKeys = useMemo(
@@ -1600,7 +1621,7 @@ export function App({
 				case "lsp":
 					toggleLsp();
 					break;
-				case "keys":
+				case "providers":
 					setMode("keys");
 					break;
 				case "context":

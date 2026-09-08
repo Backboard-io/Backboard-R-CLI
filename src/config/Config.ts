@@ -1,5 +1,6 @@
 import { canonicalToolName } from "../core/tools/names.ts";
 import { ToolPolicy } from "../core/tools/ToolPolicy.ts";
+import type { ProviderRegistry } from "../providers/byok/registry.ts";
 import {
 	type AuthState,
 	hasAnyCredentials,
@@ -473,19 +474,26 @@ export class Config {
 		return this.auth.providerKeys.length > 0;
 	}
 
+	get providerRegistry(): ProviderRegistry {
+		return this.auth.providerRegistry;
+	}
+
 	hasProviderKeyFor(provider: string): boolean {
-		return this.auth.providerKeys.some((entry) => entry.provider === provider);
+		const normalized = provider.trim().toLowerCase();
+		return this.auth.providerKeys.some(
+			(entry) => entry.provider.trim().toLowerCase() === normalized,
+		);
 	}
 
 	private hasBackendFor(model: ModelRef): boolean {
-		return this.hasBackboardAuth || this.hasProviderKeyFor(model.provider);
+		const hasDirectProvider = this.hasProviderKeyFor(model.provider);
+		return this.providerRegistry.definition(model.provider)
+			? hasDirectProvider
+			: this.hasBackboardAuth || hasDirectProvider;
 	}
 
 	get hasBackendForCurrentModel(): boolean {
-		return (
-			this.hasBackboardAuth ||
-			this.hasProviderKeyFor(this.currentModel.provider)
-		);
+		return this.hasBackendFor(this.currentModel);
 	}
 
 	/**

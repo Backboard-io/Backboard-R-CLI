@@ -14,9 +14,9 @@ export interface ListSelection {
  */
 export function useListSelection(
 	count: number,
-	opts: { digitJump?: boolean } = {},
+	opts: { digitJump?: boolean; initialIndex?: number } = {},
 ): ListSelection {
-	const [index, setIndex] = useState(0);
+	const [index, setIndex] = useState(opts.initialIndex ?? 0);
 	useEffect(() => {
 		if (count > 0 && index >= count) setIndex(count - 1);
 	}, [count, index]);

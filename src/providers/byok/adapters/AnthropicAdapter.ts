@@ -1,3 +1,7 @@
+import {
+	type CustomModelDefinition,
+	joinProviderUrl,
+} from "../../../config/providers.ts";
 import { contextWindowFor } from "../../../core/context/ContextWindow.ts";
 import type { OpenAITool } from "../../../core/tools/schema.ts";
 import type {
@@ -18,8 +22,8 @@ import {
 	usesNativeAdaptiveThinking,
 } from "../thinking.ts";
 import { planToolImages, renderToolResult } from "../toolImages.ts";
+import type { ConfigurableAdapterOptions } from "./ConfigurableAdapterTypes.ts";
 
-const API_BASE = "https://api.anthropic.com/v1";
 const API_VERSION = "2023-06-01";
 const DEFAULT_MAX_OUTPUT_TOKENS = 32_000;
 
@@ -67,75 +71,182 @@ interface PendingToolBlock {
 	json: string;
 }
 
-export const anthropicAdapter: ProviderAdapter = {
+export type AnthropicAdapterOptions = ConfigurableAdapterOptions;
+
+const ANTHROPIC_OPTIONS: AnthropicAdapterOptions = {
 	id: "anthropic",
 	label: "Anthropic",
+	baseUrl: "https://api.anthropic.com/v1",
 	consoleUrl: "https://console.anthropic.com/settings/keys",
 	keyHint: "sk-ant-...",
-
-	looksLikeKey(key) {
-		return /^sk-ant-[\w-]{20,}$/.test(key.trim());
-	},
-
-	async validateKey(key, signal) {
-		// A models list is the cheapest authenticated GET: it costs no tokens
-		// and still fails closed on a bad key.
-		await getJson<AnthropicModelsResponse>(
-			`${API_BASE}/models?limit=1`,
-			headers(key),
-			"anthropic",
-			signal,
-		);
-	},
-
-	async listModels(key, signal) {
-		const response = await getJson<AnthropicModelsResponse>(
-			`${API_BASE}/models?limit=1000`,
-			headers(key),
-			"anthropic",
-			signal,
-		);
-		const models: ModelCatalogItem[] = [];
-		for (const model of response.data ?? []) {
-			if (!model.id) continue;
-			models.push({
-				name: model.id,
-				provider: "anthropic",
-				model_type: "llm",
-				last_updated: model.created_at ?? null,
-				supports_thinking: true,
-				context_limit: contextWindowFor({
-					provider: "anthropic",
-					model: model.id,
-				}),
-			});
-		}
-		return models;
-	},
-
-	supportsThinking() {
-		return true;
-	},
-
-	stream(request, key) {
-		return streamAnthropic(request, key);
-	},
+	requiresKey: true,
 };
 
-function headers(key: string): Record<string, string> {
-	return { "x-api-key": key.trim(), "anthropic-version": API_VERSION };
+export const anthropicAdapter: ProviderAdapter =
+	createAnthropicAdapter(ANTHROPIC_OPTIONS);
+
+export function createAnthropicAdapter(
+	options: AnthropicAdapterOptions,
+): ProviderAdapter {
+	return {
+		id: options.id,
+		label: options.label,
+		consoleUrl: options.consoleUrl ?? options.baseUrl,
+		keyHint: options.keyHint ?? "API key (optional for keyless endpoints)",
+		requiresKey: options.requiresKey ?? true,
+
+		looksLikeKey(key) {
+			return options.id === "anthropic"
+				? /^sk-ant-[\w-]{20,}$/.test(key.trim())
+				: Boolean(key.trim()) || options.requiresKey === false;
+		},
+
+		async validateKey(key, signal) {
+			if (options.discoverModels === false) return;
+			// A models list is the cheapest authenticated GET: it costs no tokens
+			// and still fails closed on a bad key.
+			await getJson<AnthropicModelsResponse>(
+				modelsUrlWithLimit(options, 1),
+				requestHeaders(key, options),
+				options.id,
+				signal,
+			);
+		},
+
+		async listModels(key, signal) {
+			const response =
+				options.discoverModels === false
+					? { data: [] }
+					: await getJson<AnthropicModelsResponse>(
+							modelsUrlWithLimit(options, 1000),
+							requestHeaders(key, options),
+							options.id,
+							signal,
+						);
+			const models = new Map<string, ModelCatalogItem>();
+			for (const model of response.data ?? []) {
+				if (!model.id) continue;
+				models.set(model.id.toLowerCase(), {
+					name: model.id,
+					display_name: model.display_name,
+					provider: options.id,
+					model_type: "llm",
+					last_updated: model.created_at ?? null,
+					supports_thinking: true,
+					thinking_controls: anthropicThinkingControls(model.id),
+					context_limit: contextWindowFor({
+						provider: options.id,
+						model: model.id,
+					}),
+				});
+			}
+			for (const model of options.models ?? []) {
+				if (model.enabled === false) {
+					models.delete(model.id.toLowerCase());
+					continue;
+				}
+				models.set(model.id.toLowerCase(), configuredModel(options.id, model));
+			}
+			return [...models.values()];
+		},
+
+		supportsThinking(model) {
+			const configured = options.models?.find((entry) => entry.id === model);
+			return configured?.supportsThinking ?? true;
+		},
+
+		thinkingControls(model) {
+			const configured = options.models?.find((entry) => entry.id === model);
+			return configured?.supportsThinking === false
+				? undefined
+				: anthropicThinkingControls(model);
+		},
+
+		stream(request, key) {
+			return streamAnthropic(request, key, options);
+		},
+	};
+}
+
+function requestHeaders(
+	key: string,
+	options: AnthropicAdapterOptions,
+): Record<string, string> {
+	return {
+		...(key.trim() ? { "x-api-key": key.trim() } : {}),
+		"anthropic-version": API_VERSION,
+		...options.headers,
+	};
+}
+
+function modelsUrl(options: AnthropicAdapterOptions): string {
+	return joinProviderUrl(options.baseUrl, options.modelsPath ?? "models");
+}
+
+function modelsUrlWithLimit(
+	options: AnthropicAdapterOptions,
+	limit: number,
+): string {
+	const url = new URL(modelsUrl(options));
+	url.searchParams.set("limit", String(limit));
+	return url.toString();
+}
+
+function configuredModel(
+	provider: string,
+	model: CustomModelDefinition,
+): ModelCatalogItem {
+	return {
+		name: model.id,
+		provider,
+		model_type: "llm",
+		...(model.name ? { display_name: model.name } : {}),
+		...(model.contextLimit ? { context_limit: model.contextLimit } : {}),
+		...(model.maxOutputTokens
+			? { max_output_tokens: model.maxOutputTokens }
+			: {}),
+		...(typeof model.supportsThinking === "boolean"
+			? { supports_thinking: model.supportsThinking }
+			: { supports_thinking: true }),
+		...(model.supportsThinking === false
+			? {}
+			: { thinking_controls: anthropicThinkingControls(model.id) }),
+	};
+}
+
+function anthropicThinkingControls(
+	model: string,
+): NonNullable<ModelCatalogItem["thinking_controls"]> {
+	return {
+		supported: true,
+		...(usesNativeAdaptiveThinking("anthropic", model)
+			? { allowed_fields: ["effort"] }
+			: {
+					allowed_fields: ["budget_tokens"],
+					budget_policy: "anthropicLegacy" as const,
+				}),
+		defaults_only: false,
+	};
 }
 
 async function* streamAnthropic(
 	request: ByokStreamRequest,
 	key: string,
+	options: AnthropicAdapterOptions = ANTHROPIC_OPTIONS,
 ): AsyncIterable<ProviderEvent> {
+	const modelConfig = options.models?.find(
+		(entry) => entry.id === request.model,
+	);
 	const maxTokens = maxOutputTokensFor(
 		request.model,
-		request.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS,
+		request.maxOutputTokens ??
+			modelConfig?.maxOutputTokens ??
+			DEFAULT_MAX_OUTPUT_TOKENS,
 	);
 
 	const body: Record<string, unknown> = {
+		...options.extraArgs,
+		...modelConfig?.extraArgs,
 		model: request.model,
 		max_tokens: maxTokens,
 		// Blocks, not a bare string, so the prefix can carry a cache breakpoint.
@@ -146,7 +257,10 @@ async function* streamAnthropic(
 				cache_control: EPHEMERAL,
 			},
 		],
-		messages: toAnthropicMessages(request.messages),
+		messages: toAnthropicMessages(
+			request.messages,
+			modelConfig?.noImageSupport !== true,
+		),
 		stream: true,
 	};
 	if (request.tools.length > 0) body.tools = toAnthropicTools(request.tools);
@@ -162,10 +276,10 @@ async function* streamAnthropic(
 	let messageStopped = false;
 
 	const sseRequest: Parameters<typeof postSseJson>[0] = {
-		url: `${API_BASE}/messages`,
-		headers: headers(key),
+		url: joinProviderUrl(options.baseUrl, "messages"),
+		headers: requestHeaders(key, options),
 		body,
-		provider: "anthropic",
+		provider: options.id,
 	};
 	if (request.signal) sseRequest.signal = request.signal;
 
@@ -176,7 +290,7 @@ async function* streamAnthropic(
 			const error = event.error as { message?: string } | undefined;
 			yield {
 				kind: "failed",
-				error: error?.message ?? "Anthropic returned an error event",
+				error: error?.message ?? `${options.label} returned an error event`,
 			};
 			return;
 		}
@@ -264,7 +378,7 @@ async function* streamAnthropic(
 	if (!messageStopped) {
 		yield {
 			kind: "failed",
-			error: unexpectedStreamEndMessage("anthropic"),
+			error: unexpectedStreamEndMessage(options.label),
 			retryable: true,
 		};
 		return;
@@ -282,8 +396,11 @@ async function* streamAnthropic(
 		totalTokens: promptTokens + outputTokens,
 		cachedTokens,
 		cacheWriteTokens,
-		provider: "anthropic",
+		provider: options.id,
 		model: request.model,
+		...(modelConfig?.contextLimit
+			? { contextLimit: modelConfig.contextLimit }
+			: {}),
 	};
 
 	if (truncatedCall) {
@@ -413,8 +530,11 @@ function toAnthropicTools(tools: readonly OpenAITool[]): unknown[] {
  * transcript at full input price each time. With it, each leg writes only the
  * delta past the previous breakpoint and reads everything before it.
  */
-function toAnthropicMessages(messages: readonly ByokMessage[]): unknown[] {
-	const rendered = renderMessages(messages);
+function toAnthropicMessages(
+	messages: readonly ByokMessage[],
+	acceptsImages = true,
+): unknown[] {
+	const rendered = renderMessages(messages, acceptsImages);
 	const last = rendered.at(-1);
 	if (last) {
 		const lastBlock = last.content.at(-1);
@@ -428,12 +548,20 @@ interface RenderedMessage {
 	content: Array<Record<string, unknown>>;
 }
 
-function renderMessages(messages: readonly ByokMessage[]): RenderedMessage[] {
+function renderMessages(
+	messages: readonly ByokMessage[],
+	acceptsImages: boolean,
+): RenderedMessage[] {
 	const out: RenderedMessage[] = [];
-	const imagePlan = planToolImages(messages);
+	const imagePlan = acceptsImages
+		? planToolImages(messages)
+		: new Set<string>();
 	for (const [messageIndex, message] of messages.entries()) {
 		if (message.role === "user") {
-			out.push({ role: "user", content: userContent(message) });
+			out.push({
+				role: "user",
+				content: userContent(message, acceptsImages),
+			});
 			continue;
 		}
 		if (message.role === "assistant") {
@@ -490,10 +618,11 @@ function renderMessages(messages: readonly ByokMessage[]): RenderedMessage[] {
 
 function userContent(
 	message: Extract<ByokMessage, { role: "user" }>,
+	acceptsImages: boolean,
 ): Array<Record<string, unknown>> {
 	const content: Array<Record<string, unknown>> = [];
 	for (const attachment of message.attachments ?? []) {
-		if (attachment.base64) {
+		if (attachment.base64 && acceptsImages) {
 			content.push({
 				type: "image",
 				source: {
@@ -501,6 +630,11 @@ function userContent(
 					media_type: attachment.mediaType,
 					data: attachment.base64,
 				},
+			});
+		} else if (attachment.base64) {
+			content.push({
+				type: "text",
+				text: `[Image attachment omitted because this model is configured without image support: ${attachment.path}]`,
 			});
 		} else if (attachment.text) {
 			content.push({

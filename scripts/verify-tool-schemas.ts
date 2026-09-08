@@ -12,10 +12,10 @@
  * Opt-in; never part of `bun test`. Costs a few tokens per model.
  */
 import { Config } from "../src/config/Config.ts";
+import { BYOK_PROVIDER_IDS } from "../src/core/keys/ProviderKeyTypes.ts";
 import { ToolRegistry } from "../src/core/tools/ToolRegistry.ts";
 import { BackboardClient } from "../src/providers/backboard/BackboardClient.ts";
 import type { ModelCatalogItem } from "../src/providers/backboard/types.ts";
-import { byokAdapter } from "../src/providers/byok/registry.ts";
 import { createAgentClient } from "../src/providers/createAgentClient.ts";
 import { createDefaultTools } from "../src/tools/index.ts";
 
@@ -30,17 +30,21 @@ config.enableComputerUse();
 config.enableBrowserUse();
 const router = createAgentClient(config);
 await Promise.all(
-	config.auth.providerKeys.map(async ({ provider, key }) => {
-		try {
-			await byokAdapter(provider).listModels(key);
-		} catch (err) {
-			throw new Error(
-				`${provider} catalog failed: ${
-					err instanceof Error ? err.message : String(err)
-				}`,
-			);
-		}
-	}),
+	config.auth.providerKeys
+		.filter(({ provider }) => !filter || provider.includes(filter))
+		.map(async ({ provider, key }) => {
+			try {
+				const adapter = config.providerRegistry.get(provider);
+				if (!adapter) throw new Error("provider adapter is unavailable");
+				await adapter.listModels(key);
+			} catch (err) {
+				throw new Error(
+					`${provider} catalog failed: ${
+						err instanceof Error ? err.message : String(err)
+					}`,
+				);
+			}
+		}),
 );
 let toolList: ReturnType<typeof createDefaultTools> = [];
 toolList = createDefaultTools({
@@ -71,7 +75,12 @@ const PREFERRED = [
 ];
 
 function pick(models: ModelCatalogItem[]): string | undefined {
-	const names = models.map((m) => m.name).filter((n) => !SKIP.test(n));
+	const names = models
+		.filter(
+			(model) => !filter || `${model.provider}/${model.name}`.includes(filter),
+		)
+		.map((m) => m.name)
+		.filter((n) => !SKIP.test(n));
 	for (const re of PREFERRED) {
 		const hit = names.find((n) => re.test(n));
 		if (hit) return hit;
@@ -164,8 +173,11 @@ if (backboard) {
 	const server = catalog.filter((m) => m.source !== "byok");
 	const providers = new Set(server.map((m) => m.provider));
 	// The merged catalog hides Backboard's own route for providers you also hold a key for.
-	for (const provider of [...new Set(byok.map((m) => m.provider))])
-		providers.add(provider);
+	for (const provider of BYOK_PROVIDER_IDS) {
+		if (byok.some((model) => model.provider === provider)) {
+			providers.add(provider);
+		}
+	}
 	for (const provider of providers) {
 		if (SKIP.test(provider)) continue;
 		const model =

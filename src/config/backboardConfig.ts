@@ -14,6 +14,7 @@ import {
 	parseMemoryProfile,
 	type ThinkingLevel,
 } from "./defaults.ts";
+import { parseCustomProviders } from "./providers.ts";
 
 export type { BackboardConfigFile } from "./BackboardConfigTypes.ts";
 
@@ -50,6 +51,7 @@ export function readBackboardConfig(
 			memoryProfile: readMemoryProfileConfig(config),
 			notify: typeof config.notify === "boolean" ? config.notify : undefined,
 			verbose: typeof config.verbose === "boolean" ? config.verbose : undefined,
+			providers: parseCustomProviders(config.providers),
 			expert: readExpertConfig(config),
 		};
 	} catch (err) {
@@ -194,15 +196,54 @@ export async function saveBackboardConfig(
 ): Promise<string> {
 	const file = backboardConfigPath(homeDir);
 	const dir = path.dirname(file);
+	const opaqueProviders = readOpaqueProviderEntries(file);
+	const output =
+		opaqueProviders.length === 0
+			? config
+			: {
+					...config,
+					providers: [...(config.providers ?? []), ...opaqueProviders],
+				};
 
 	await mkdir(dir, { recursive: true, mode: 0o700 });
 	await chmod(dir, 0o700).catch(() => undefined);
-	await writeFile(file, `${JSON.stringify(config, null, 2)}\n`, {
+	await writeFile(file, `${JSON.stringify(output, null, 2)}\n`, {
 		mode: 0o600,
 	});
 	await chmod(file, 0o600).catch(() => undefined);
 
 	return file;
+}
+
+function readOpaqueProviderEntries(file: string): JsonValue[] {
+	let parsed: JsonValue;
+	try {
+		parsed = JSON.parse(readFileSync(file, "utf8")) as JsonValue;
+	} catch (err) {
+		if ((err as { code?: string }).code === "ENOENT") return [];
+		throw new Error(
+			`Failed to preserve providers in ${file}: ${errorMessage(err)}`,
+		);
+	}
+	if (
+		typeof parsed !== "object" ||
+		parsed === null ||
+		Array.isArray(parsed) ||
+		!Array.isArray(parsed.providers)
+	) {
+		return [];
+	}
+	const opaque: JsonValue[] = [];
+	const seen = new Set<string>();
+	for (const entry of parsed.providers) {
+		const provider = parseCustomProviders([entry])?.[0];
+		if (!provider || seen.has(provider.id)) {
+			opaque.push(entry);
+			continue;
+		}
+		seen.add(provider.id);
+	}
+	return opaque;
 }
 
 export async function deleteBackboardConfig(
@@ -218,4 +259,17 @@ export async function deleteBackboardConfig(
 		}
 		throw new Error(`Failed to delete ${file}: ${errorMessage(err)}`);
 	}
+}
+
+/** Removes only the Backboard credential while preserving local preferences/providers. */
+export async function clearBackboardCredential(
+	homeDir = os.homedir(),
+): Promise<{ path: string; removed: boolean }> {
+	const existing = readBackboardConfig(homeDir);
+	if (!existing.apiKey) {
+		return { path: backboardConfigPath(homeDir), removed: false };
+	}
+	const { apiKey: _removed, ...rest } = existing;
+	await saveBackboardConfig(rest, homeDir);
+	return { path: backboardConfigPath(homeDir), removed: true };
 }

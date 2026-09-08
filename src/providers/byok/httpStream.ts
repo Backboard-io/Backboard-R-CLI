@@ -71,6 +71,14 @@ export async function* postSseJson(
 			null,
 		);
 	}
+	const contentType = res.headers.get("content-type")?.toLowerCase() ?? "";
+	if (contentType.includes("application/json")) {
+		const payload = (await res.json()) as unknown;
+		if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+			yield payload as Record<string, unknown>;
+		}
+		return;
+	}
 
 	for await (const frame of readSseFrames(res.body)) {
 		const data = sseDataPayload(frame);
@@ -111,6 +119,7 @@ function providerLabel(provider: ByokProviderId): string {
 		case "openrouter":
 			return "OpenRouter";
 	}
+	return provider;
 }
 
 export function safeJson(text: string): unknown {

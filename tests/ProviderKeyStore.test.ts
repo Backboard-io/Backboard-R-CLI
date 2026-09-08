@@ -92,19 +92,20 @@ describe("provider key store", () => {
 		expect(readProviderKeys(home)).toEqual({});
 	});
 
-	it("ignores unknown providers and malformed entries", async () => {
+	it("preserves custom providers and ignores malformed ids and entries", async () => {
 		const home = await tempHome();
 		await Bun.write(
 			providerKeysPath(home),
 			JSON.stringify({
 				anthropic: { key: "sk-ant-ok", enabled: true },
 				bogus: { key: "sk-nope", enabled: true },
+				"not a provider": { key: "sk-invalid", enabled: true },
 				openai: { enabled: true },
 				google: "not-an-object",
 			}),
 		);
 
-		expect(Object.keys(readProviderKeys(home))).toEqual(["anthropic"]);
+		expect(Object.keys(readProviderKeys(home))).toEqual(["anthropic", "bogus"]);
 	});
 
 	it("never writes the secret in readable form", async () => {

@@ -17,6 +17,7 @@ import type {
 	ProviderStreamConsumer,
 } from "./ProviderStreamConsumer.ts";
 import { preserveProviderContext } from "./ProviderStreamConsumer.ts";
+import type { TurnTiming } from "./timing/TurnTiming.ts";
 
 export interface ToolRoundProcessorDeps {
 	client: AgentClient;
@@ -26,6 +27,7 @@ export interface ToolRoundProcessorDeps {
 	consumer: ProviderStreamConsumer;
 	tools: SubmitToolOutputsRequest["tools"];
 	maxToolRounds?: number;
+	timing?: TurnTiming;
 }
 
 export class ToolRoundProcessor {
@@ -123,10 +125,14 @@ export class ToolRoundProcessor {
 				}
 				this.recordToolMessage(newCalls, outputs);
 
+				// Decorate only the outbound copies, after recording ordinary results.
+				// Interrupted rounds above never consume timer thresholds.
 				const request: SubmitToolOutputsRequest = {
 					thread_id: this.deps.session.threadId ?? "",
 					...(pending.runId ? { run_id: pending.runId } : {}),
-					tool_outputs: outputs.map(toBackboardToolOutput),
+					tool_outputs:
+						this.deps.timing?.append(outputs, this.deps.session.todos) ??
+						outputs.map(toBackboardToolOutput),
 					tools: this.deps.tools,
 				};
 				round = this.createEarlyRound(ctx, turnId);

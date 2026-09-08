@@ -222,6 +222,27 @@ function controllerWith(
 }
 
 describe("AgentController loop (mocked Backboard)", () => {
+	it("passes the configured timer through the loop factory without changing the system prefix", async () => {
+		const client = new FakeClient(
+			[{ kind: "thread", threadId: "thr_timer" }, { kind: "completed" }],
+			[],
+		);
+		const { ctrl } = controllerWith(client, new TestTool({ name: "Read" }), [
+			"--timer",
+			"900",
+		]);
+		expect(await ctrl.submit("hello")).toBe("completed");
+		expect(client.messageRequests[0]?.content).toContain(
+			"allocated 15m for this turn",
+		);
+		expect(client.messageRequests[0]?.system_prompt).not.toContain(
+			"## Time budget",
+		);
+		expect(client.assistantRequests[0]?.system_prompt).not.toContain(
+			"## Time budget",
+		);
+		await ctrl.dispose();
+	});
 	it("emits turn:start and accepted prompt before assistant setup finishes", async () => {
 		const client = new FakeClient(
 			[

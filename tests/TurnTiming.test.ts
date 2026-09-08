@@ -44,7 +44,9 @@ describe("TurnTiming outbound decoration", () => {
 
 	it("recognizes successful wire-name TodoWrite calls and combines both notices", () => {
 		const timing = new TurnTiming(900, START);
+		timing.recordTodoUpdate("todo_write", [todo("in_progress")], START);
 		timing.append([output("todo_write")], [todo("in_progress")], START);
+		timing.recordTodoUpdate("todo_write", [todo("completed")], START + 480_000);
 		const wire = timing.append(
 			[output("todo_write"), output("read")],
 			[todo("completed")],
@@ -57,11 +59,13 @@ describe("TurnTiming outbound decoration", () => {
 
 	it("does not start schedule tracking from a failed todo update", () => {
 		const timing = new TurnTiming(900, START);
+		timing.recordTodoUpdate("todo_write", [todo("in_progress")], START);
 		timing.append(
 			[output("todo_write", { error: true })],
 			[todo("in_progress")],
 			START,
 		);
+		timing.recordTodoUpdate("todo_write", [todo("completed")], START + 60_000);
 		const wire = timing.append(
 			[output("todo_write")],
 			[todo("completed")],

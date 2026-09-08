@@ -88,7 +88,7 @@ export class TodoWriteTool extends Tool<Input, Output> {
 			previousTodos,
 		);
 
-		ctx.bus.emit({ type: "todos:updated", todos });
+		ctx.bus.emit({ type: "todos:updated", todos, toolCallId: ctx.toolCallId });
 
 		const readback = formatTodoReadback(todos);
 		return ok({ count: todos.length }, readback, readback);

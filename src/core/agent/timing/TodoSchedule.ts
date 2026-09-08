@@ -1,7 +1,5 @@
 import {
-	timerReminder,
 	todoOvercommitNotice,
-	todoProgressNotice,
 	todoStepNotice,
 } from "../../../prompts/timerPrompt.ts";
 import type { TodoItem } from "../../bus/events.ts";
@@ -21,14 +19,14 @@ export class TodoSchedule {
 		this.activeBudgetMs = undefined;
 	}
 
-	onUpdate(
+	recordUpdate(
 		todos: readonly TodoItem[],
 		timer: TurnTimer | undefined,
 		now = Date.now(),
-	): string | null {
+	): string[] {
 		if (!timer || todos.length === 0) {
 			this.forgetActive();
-			return null;
+			return [];
 		}
 		const active = todos.find((todo) => todo.status === "in_progress");
 		const changed = this.activeId !== undefined && active?.id !== this.activeId;
@@ -52,8 +50,7 @@ export class TodoSchedule {
 					? undefined
 					: active.timeBudgetSeconds * 1000;
 		}
-		if (!todos.some((todo) => todo.timeBudgetSeconds !== undefined))
-			return null;
+		if (!todos.some((todo) => todo.timeBudgetSeconds !== undefined)) return [];
 
 		const remainingMs = timer.remainingMs(now);
 		const aheadMs = todos
@@ -73,16 +70,6 @@ export class TodoSchedule {
 				todoStepNotice(previous?.status === "completed", tookMs, plannedMs),
 			);
 		}
-		if (lines.length === 0) return null;
-		lines.push(
-			todoProgressNotice(
-				todos.filter((todo) => todo.status === "completed").length,
-				todos.length,
-				remainingMs,
-				timer.totalBudgetMs,
-				aheadMs,
-			),
-		);
-		return timerReminder(lines);
+		return lines;
 	}
 }

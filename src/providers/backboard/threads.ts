@@ -20,12 +20,14 @@ export { truncate } from "../../utils/string.ts";
 export function threadDisplayTitle(thread: BackboardThread): string {
 	const title = thread.title?.trim();
 	if (title) return title;
-	const firstUserPreview = thread.first_user_message
-		?.replace(/\s+/g, " ")
+	const firstUserPreview = withoutTimerPrefix(thread.first_user_message ?? "")
+		.replace(/\s+/g, " ")
 		.trim();
 	if (firstUserPreview) return truncate(firstUserPreview, 60);
 	const firstUser = thread.messages.find((message) => message.role === "user");
-	const content = firstUser?.content?.replace(/\s+/g, " ").trim();
+	const content = withoutTimerPrefix(firstUser?.content ?? "")
+		.replace(/\s+/g, " ")
+		.trim();
 	if (content) return truncate(content, 60);
 	return `Session ${thread.thread_id.slice(0, 8)}`;
 }

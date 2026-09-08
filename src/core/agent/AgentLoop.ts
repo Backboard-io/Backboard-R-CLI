@@ -141,7 +141,15 @@ export class AgentLoop {
 				notifications.activeNotificationHidesResponse(),
 		});
 
+		let detachTiming: (() => void) | undefined;
 		try {
+			if (timing) {
+				detachTiming = bus.on("todos:updated", (event) => {
+					if (event.toolCallId && !ctx.signal.aborted) {
+						timing.recordTodoUpdate(event.toolCallId, event.todos);
+					}
+				});
+			}
 			const initialThinking = this.resolveThinking();
 			const messageOptions = {
 				signal: ctx.signal,
@@ -202,6 +210,8 @@ export class AgentLoop {
 				durationMs: turn.durationMs(),
 			});
 			return "failed";
+		} finally {
+			detachTiming?.();
 		}
 
 		bus.emit({

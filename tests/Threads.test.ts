@@ -12,6 +12,7 @@ import {
 import {
 	backboardThreadToMessages,
 	sortThreadsByUpdatedAt,
+	threadDisplayTitle,
 	threadUpdatedAt,
 } from "../src/providers/backboard/threads.ts";
 import type {
@@ -20,6 +21,17 @@ import type {
 } from "../src/providers/backboard/types.ts";
 
 describe("Backboard thread helpers", () => {
+	it("uses the human task for timed session title fallbacks", () => {
+		const content = `${timerBudgetPrompt(900)}\n\nFix authentication`;
+		const thread = threadWithMessages([{ role: "user", content }]);
+		expect(threadDisplayTitle(thread)).toBe("Fix authentication");
+		expect(threadDisplayTitle({ ...thread, first_user_message: content })).toBe(
+			"Fix authentication",
+		);
+		expect(threadDisplayTitle({ ...thread, title: "Explicit title" })).toBe(
+			"Explicit title",
+		);
+	});
 	it("restores human input and tool output without tagged timer context", () => {
 		const original =
 			"Error: tests failed\n<system-reminder>keep this real output</system-reminder>";

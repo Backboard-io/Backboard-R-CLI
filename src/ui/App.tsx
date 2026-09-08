@@ -72,6 +72,7 @@ import {
 	HELP_TEXT,
 	parseCommand,
 } from "./commands/index.ts";
+import { handleTimerCommand } from "./commands/timer.ts";
 import { AskUserPrompt } from "./components/AskUserPrompt.tsx";
 import { ContextPanel } from "./components/ContextPanel.tsx";
 import { HookAddForm } from "./components/HookAddForm.tsx";
@@ -1702,30 +1703,7 @@ export function App({
 					break;
 				}
 				case "timer": {
-					if (command.error) {
-						agent.notice(command.error, "error");
-						break;
-					}
-					if (command.seconds === null && config.timerSeconds === undefined) {
-						agent.notice(
-							"No time budget set. Use /timer <seconds> to set one.",
-							"warning",
-						);
-						break;
-					}
-					const next = command.seconds ?? undefined;
-					config.setTimerSeconds(next);
-					void config.saveTimerPreference().catch((err) => {
-						agent.notice(
-							`Failed to save timer preference: ${errorMessage(err)}`,
-							"error",
-						);
-					});
-					agent.notice(
-						next === undefined
-							? "Time budget cleared for subsequent turns."
-							: `Time budget set to ${next}s per turn, starting with the next turn.`,
-					);
+					void handleTimerCommand(command, config, agent.notice);
 					break;
 				}
 				case "update":

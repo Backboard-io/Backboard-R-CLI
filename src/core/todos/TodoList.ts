@@ -128,7 +128,7 @@ function todoDraftsFromInput(input: unknown): TodoDraft[] {
 			status?: unknown;
 			timeBudgetSeconds?: unknown;
 		};
-		if (typeof content !== "string" || content.length === 0) continue;
+		if (typeof content !== "string" || content.trim().length === 0) continue;
 		if (
 			status !== "pending" &&
 			status !== "in_progress" &&
@@ -136,7 +136,7 @@ function todoDraftsFromInput(input: unknown): TodoDraft[] {
 		)
 			continue;
 		todos.push({
-			content,
+			content: content.trim(),
 			status,
 			...(isTimerSeconds(timeBudgetSeconds) ? { timeBudgetSeconds } : {}),
 		});

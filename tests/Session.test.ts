@@ -25,7 +25,7 @@ describe("Session", () => {
 			threadId: "thread",
 			messages: [
 				...write("plan", [
-					{ content: "A", status: "in_progress", timeBudgetSeconds: 120 },
+					{ content: " A ", status: "in_progress", timeBudgetSeconds: 120 },
 					{ content: "B", status: "pending", timeBudgetSeconds: 300 },
 				]),
 				...write("advance", [

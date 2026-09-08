@@ -2,6 +2,10 @@ import { describe, expect, it } from "bun:test";
 import { TodoSchedule } from "../src/core/agent/timing/TodoSchedule.ts";
 import { TurnTimer } from "../src/core/agent/timing/TurnTimer.ts";
 import type { TodoItem } from "../src/core/bus/events.ts";
+import {
+	timerReminder,
+	todoProgressNotice,
+} from "../src/prompts/timerPrompt.ts";
 
 const START = 1_000_000;
 const timer = () => new TurnTimer(900_000, START);
@@ -16,9 +20,38 @@ const todo = (
 	...(timeBudgetSeconds === undefined ? {} : { timeBudgetSeconds }),
 });
 
+function createSchedule() {
+	const schedule = new TodoSchedule();
+	return {
+		onUpdate(
+			todos: readonly TodoItem[],
+			budget: TurnTimer | undefined,
+			now: number,
+		) {
+			const lines = schedule.recordUpdate(todos, budget, now);
+			if (!budget || lines.length === 0) return null;
+			return timerReminder([
+				...lines,
+				todoProgressNotice(
+					todos.filter((todo) => todo.status === "completed").length,
+					todos.length,
+					budget.remainingMs(now),
+					budget.totalBudgetMs,
+					todos
+						.filter((todo) => todo.status !== "completed")
+						.reduce(
+							(sum, todo) => sum + (todo.timeBudgetSeconds ?? 0) * 1000,
+							0,
+						),
+				),
+			]);
+		},
+	};
+}
+
 describe("TodoSchedule", () => {
 	it("requires a timer and at least one allocation", () => {
-		const schedule = new TodoSchedule();
+		const schedule = createSchedule();
 		expect(
 			schedule.onUpdate([todo("a", "in_progress", 60)], undefined, START),
 		).toBeNull();
@@ -28,7 +61,7 @@ describe("TodoSchedule", () => {
 	});
 
 	it("waits for transitions and reports actual time against the original allowance", () => {
-		const schedule = new TodoSchedule();
+		const schedule = createSchedule();
 		const t = timer();
 		expect(
 			schedule.onUpdate(
@@ -67,7 +100,7 @@ describe("TodoSchedule", () => {
 	});
 
 	it("reports a moved-off step without claiming completion", () => {
-		const schedule = new TodoSchedule();
+		const schedule = createSchedule();
 		const t = timer();
 		schedule.onUpdate([todo("a", "in_progress", 120)], t, START);
 		const note = schedule.onUpdate(
@@ -80,7 +113,7 @@ describe("TodoSchedule", () => {
 	});
 
 	it("reports the final step when no active todo remains", () => {
-		const schedule = new TodoSchedule();
+		const schedule = createSchedule();
 		const t = timer();
 		schedule.onUpdate([todo("a", "in_progress", 60)], t, START);
 		expect(
@@ -91,7 +124,7 @@ describe("TodoSchedule", () => {
 	});
 
 	it("flags overcommit only once and tolerates planning overhead", () => {
-		const schedule = new TodoSchedule();
+		const schedule = createSchedule();
 		const t = timer();
 		expect(
 			schedule.onUpdate(
@@ -108,7 +141,7 @@ describe("TodoSchedule", () => {
 	});
 
 	it("does not count completed allocations as future work", () => {
-		const schedule = new TodoSchedule();
+		const schedule = createSchedule();
 		const t = timer();
 		const plan = (active: number) =>
 			["a", "b", "c", "d", "e"].map((id, i) =>
@@ -125,7 +158,7 @@ describe("TodoSchedule", () => {
 	});
 
 	it("tracks distinct IDs even when step titles match", () => {
-		const schedule = new TodoSchedule();
+		const schedule = createSchedule();
 		const t = timer();
 		const a = { ...todo("a", "in_progress", 180), content: "run tests" };
 		const b = { ...todo("b", "pending", 600), content: "run tests" };
@@ -143,7 +176,7 @@ describe("TodoSchedule", () => {
 	});
 
 	it("re-arms across unbudgeted replans and forgets cleared plans", () => {
-		const schedule = new TodoSchedule();
+		const schedule = createSchedule();
 		const t = timer();
 		schedule.onUpdate([todo("a", "in_progress", 180)], t, START);
 		expect(

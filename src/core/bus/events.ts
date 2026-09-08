@@ -154,7 +154,7 @@ export type AgentEvent =
 	| { type: "input:request"; request: AskUserRequest }
 	| { type: "input:response"; response: AskUserResponse }
 	| { type: "permission:mode"; mode: PermissionMode }
-	| { type: "todos:updated"; todos: TodoItem[] }
+	| { type: "todos:updated"; todos: TodoItem[]; toolCallId?: string }
 	| { type: "usage"; usage: UsageInfo }
 	| { type: "system:warning"; message: string }
 	| { type: "run:error"; error: string };

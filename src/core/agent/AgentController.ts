@@ -490,6 +490,7 @@ export class AgentController {
 				thinkingResolver,
 				requestKind: "user",
 				finalVerificationNudge: config.finalVerificationNudge,
+				timerSeconds: config.timerSeconds,
 				turnId: turn.id,
 				turnStartedAt: turn.startedAt,
 				turnAlreadyStarted: true,

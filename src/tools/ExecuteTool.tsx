@@ -275,9 +275,14 @@ export class ExecuteTool extends Tool<Input, Output> {
 			if (pid === undefined)
 				throw new Error("background command did not start");
 			const output = `started background command\npid: ${pid}\nlog path: ${logPath}`;
-			return Promise.resolve(
-				ok({ pid, logPath, fireAndForget: true }, output, `Started PID ${pid}`),
-			);
+			return Promise.resolve({
+				...ok(
+					{ pid, logPath, fireAndForget: true },
+					output,
+					`Started PID ${pid}`,
+				),
+				stillRunning: true,
+			});
 		} finally {
 			closeSync(stdoutFd);
 			closeSync(stderrFd);

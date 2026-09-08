@@ -2,6 +2,7 @@ export interface CliFlags {
 	model?: string;
 	format?: string;
 	thinking?: string;
+	timer?: string;
 	memory?: string;
 	memoryProfile?: string;
 	excludedTools: string[];
@@ -76,6 +77,12 @@ export function parseFlags(argv: string[]): CliFlags {
 				break;
 			case "thinking":
 				flags.thinking = readValue();
+				break;
+			case "timer":
+				flags.timer = readValue() ?? "";
+				break;
+			case "no-timer":
+				flags.timer = "off";
 				break;
 			case "memory":
 				flags.memory = readValue();

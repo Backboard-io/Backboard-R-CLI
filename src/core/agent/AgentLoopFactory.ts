@@ -47,6 +47,7 @@ export interface CreateLoopOptions {
 	thinkingResolver?: RuntimeThinkingResolver;
 	requestKind: ThinkingRequestKind;
 	finalVerificationNudge?: boolean;
+	timerSeconds?: number;
 	turnId?: string;
 	turnStartedAt?: number;
 	turnAlreadyStarted?: boolean;
@@ -106,6 +107,7 @@ export class AgentLoopFactory {
 			thinkingResolver: options.thinkingResolver,
 			requestKind: options.requestKind,
 			finalVerificationNudge: options.finalVerificationNudge,
+			timerSeconds: options.timerSeconds,
 			turnId: options.turnId,
 			turnStartedAt: options.turnStartedAt,
 			turnAlreadyStarted: options.turnAlreadyStarted,

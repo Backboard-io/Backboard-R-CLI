@@ -74,6 +74,7 @@ describe("ExecuteTool shell capture wiring", () => {
 			ctx,
 		);
 		expect(result.data.fireAndForget).toBe(true);
+		expect(result.stillRunning).toBe(true);
 		expect(calls).toEqual([]);
 	}, 10_000);
 });

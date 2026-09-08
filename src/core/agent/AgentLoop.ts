@@ -5,6 +5,7 @@ import type {
 	ThinkingRequestKind,
 } from "../../config/defaults.ts";
 import type { RuntimeThinkingResolver } from "../../config/thinkingRuntime.ts";
+import { timerBudgetPrompt } from "../../prompts/timerPrompt.ts";
 import type {
 	AgentClient,
 	RunMessageOptions,
@@ -25,6 +26,7 @@ import { ProviderStreamConsumer } from "./ProviderStreamConsumer.ts";
 import { buildRunMessageRequest } from "./RunMessageRequestBuilder.ts";
 import { ToolRoundProcessor } from "./ToolRoundProcessor.ts";
 import { Turn } from "./Turn.ts";
+import { TurnTiming } from "./timing/TurnTiming.ts";
 
 export interface AgentLoopDeps {
 	client: AgentClient;
@@ -44,6 +46,8 @@ export interface AgentLoopDeps {
 	thinkingResolver?: RuntimeThinkingResolver;
 	requestKind?: ThinkingRequestKind;
 	finalVerificationNudge?: boolean;
+	/** Advisory only; independent of sub-agent execution limits. */
+	timerSeconds?: number;
 	turnId?: string;
 	turnStartedAt?: number;
 	turnAlreadyStarted?: boolean;
@@ -78,6 +82,14 @@ export class AgentLoop {
 		}
 
 		const consumer = new ProviderStreamConsumer(bus, session);
+		const timing =
+			this.deps.timerSeconds === undefined
+				? undefined
+				: new TurnTiming(this.deps.timerSeconds, turn.startedAt);
+		const timedContent =
+			this.deps.timerSeconds === undefined
+				? content
+				: `${timerBudgetPrompt(this.deps.timerSeconds)}\n\n${content}`;
 		const processor = new ToolRoundProcessor({
 			client: this.deps.client,
 			scheduler: this.deps.scheduler,
@@ -86,6 +98,7 @@ export class AgentLoop {
 			consumer,
 			tools: this.deps.tools,
 			maxToolRounds: this.deps.maxToolRounds,
+			timing,
 		});
 		this.executedToolRounds = 0;
 
@@ -133,11 +146,12 @@ export class AgentLoop {
 			const messageOptions = {
 				signal: ctx.signal,
 				attachmentFilePaths: this.deps.attachmentFilePaths,
-				displayContent: this.deps.displayContent,
+				displayContent:
+					this.deps.displayContent ?? (timing ? content : undefined),
 				durableSession: this.deps.durableSession,
 			};
 			const buildMessageRequest = () =>
-				buildRunMessageRequest(content, this.deps, initialThinking);
+				buildRunMessageRequest(timedContent, this.deps, initialThinking);
 			const createMessageStream = () =>
 				this.deps.client.runMessage(buildMessageRequest(), messageOptions);
 

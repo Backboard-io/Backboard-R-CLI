@@ -129,6 +129,39 @@ For the complete first-session walkthrough, see the
 Backboard SSO into a separate application, see the
 [Backboard SSO integration guide](https://docs.backboard.io/concepts/sso).
 
+## Per-turn time budgets
+
+```sh
+backboard --timer 900
+backboard --timer 900 --print "Implement the fix and run the tests"
+backboard --no-timer
+```
+
+`--timer` sets an advisory wall-clock budget in positive whole seconds. It
+restarts for each turn and never cancels work. Use an external harness if you
+need a hard deadline. It is separate from Execute timeouts and sub-agent limits.
+The default is off.
+
+In an interactive session, `/timer 900` sets and saves the budget for subsequent
+turns. Bare `/timer` clears it. `--timer off`, `--timer 0`, and `--no-timer`
+override a saved preference for the current run without changing it on disk.
+
+The model receives the budget before it starts working, then remaining-time
+reminders at 50%, 25%, and 10%. Reminders are appended to the last tool response
+of the next completed round, not sent as asynchronous interruptions. Background
+Execute launches also receive a current-time reminder.
+
+When the agent includes `timeBudgetSeconds` on its TodoWrite steps, step
+transitions report planned versus actual duration, completed-step count, and
+remaining time versus unfinished allocations. A materially overcommitted plan
+is flagged once per turn. These are factual reports, not instructions to abandon
+work or automatic changes to the plan.
+
+Timing state lives in `src/core/agent/timing/`; wording lives in
+`src/prompts/timerPrompt.ts`. The harness decorates outbound tool-result copies
+after recording the ordinary results, keeping injected notices out of the
+local transcript. No supervisor-model calls are made.
+
 ## Use your own model providers
 
 A Backboard login is not required when you want to call a model provider

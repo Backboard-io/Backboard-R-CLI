@@ -1,3 +1,4 @@
+import { isTimerSeconds } from "../../config/timer.ts";
 import { shortId } from "../../utils/id.ts";
 import type { TodoItem } from "../bus/events.ts";
 import type { Message } from "../session/Message.ts";
@@ -66,10 +67,13 @@ export function reconcileTodos(
 
 	return drafts.map((draft) => {
 		const previous = previousByContent.get(draft.content)?.shift();
+		const timeBudgetSeconds =
+			draft.timeBudgetSeconds ?? previous?.timeBudgetSeconds;
 		return {
 			id: previous?.id ?? shortId("todo"),
 			content: draft.content,
 			status: draft.status,
+			...(timeBudgetSeconds === undefined ? {} : { timeBudgetSeconds }),
 		};
 	});
 }
@@ -79,19 +83,21 @@ export function areTodosComplete(todos: readonly TodoItem[]): boolean {
 }
 
 export function todosFromMessages(messages: readonly Message[]): TodoItem[] {
-	for (let i = messages.length - 1; i >= 0; i--) {
+	let todos: TodoItem[] = [];
+	for (let i = 0; i < messages.length; i++) {
 		const message = messages[i];
+		if (message?.role === "user" && areTodosComplete(todos)) todos = [];
 		if (message?.role !== "assistant") continue;
-		for (let j = message.toolCalls.length - 1; j >= 0; j--) {
-			const call = message.toolCalls[j];
-			if (!call || canonicalToolName(call.name) !== "todo_write") continue;
+		for (const call of message.toolCalls) {
+			if (canonicalToolName(call.name) !== "todo_write") continue;
 			const matchingResult = findToolResult(messages, i + 1, call.id);
 			if (!matchingResult || matchingResult.isError) continue;
-			const todos = todoItemsFromInput(call.input);
-			return areTodosComplete(todos) ? [] : todos;
+			// Replay successful updates so status-only writes retain allocations.
+			// Keep historical statuses as recorded, including partial transcripts.
+			todos = reconcileTodos(todoDraftsFromInput(call.input), todos);
 		}
 	}
-	return [];
+	return areTodosComplete(todos) ? [] : todos;
 }
 
 function findToolResult(
@@ -110,16 +116,17 @@ function findToolResult(
 	return undefined;
 }
 
-function todoItemsFromInput(input: unknown): TodoItem[] {
+function todoDraftsFromInput(input: unknown): TodoDraft[] {
 	if (!input || typeof input !== "object") return [];
 	const drafts = (input as { todos?: unknown }).todos;
 	if (!Array.isArray(drafts)) return [];
-	const todos: TodoItem[] = [];
+	const todos: TodoDraft[] = [];
 	for (const draft of drafts) {
 		if (!draft || typeof draft !== "object") continue;
-		const { content, status } = draft as {
+		const { content, status, timeBudgetSeconds } = draft as {
 			content?: unknown;
 			status?: unknown;
+			timeBudgetSeconds?: unknown;
 		};
 		if (typeof content !== "string" || content.length === 0) continue;
 		if (
@@ -128,7 +135,11 @@ function todoItemsFromInput(input: unknown): TodoItem[] {
 			status !== "completed"
 		)
 			continue;
-		todos.push({ id: shortId("todo"), content, status });
+		todos.push({
+			content,
+			status,
+			...(isTimerSeconds(timeBudgetSeconds) ? { timeBudgetSeconds } : {}),
+		});
 	}
 	return normalizeTodoDrafts(todos);
 }

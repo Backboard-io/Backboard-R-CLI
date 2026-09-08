@@ -5,6 +5,10 @@ import {
 	toolMessage,
 	userMessage,
 } from "../../core/session/Message.ts";
+import {
+	withoutTimerPrefix,
+	withoutTimerSuffix,
+} from "../../core/session/TimerContext.ts";
 import { FINAL_VERIFICATION_NUDGE } from "../../prompts/finalVerification.ts";
 import { PLAN_UP_TO_DATE_REPLY } from "../../prompts/todoReminders.ts";
 import { truncate } from "../../utils/string.ts";
@@ -98,7 +102,7 @@ function backboardMessageToSessionMessage(
 			// Injected system notifications persist server-side as ordinary user
 			// messages; drop them on resume so they don't render as human input.
 			if (isInjectedNotificationMessage(message, content)) return null;
-			return userMessage(content);
+			return userMessage(withoutTimerPrefix(content));
 		case "assistant": {
 			const toolCalls = toolCallsFromMetadata(message.metadata_);
 			// The hidden reconciliation reply was never shown; keep it that way.
@@ -117,7 +121,7 @@ function backboardMessageToSessionMessage(
 				{
 					toolCallId: stringMetadata(message.metadata_, "tool_call_id") ?? "",
 					name: stringMetadata(message.metadata_, "tool_name") ?? "Tool",
-					output: content,
+					output: withoutTimerSuffix(content),
 					isError: message.status === "FAILED",
 				},
 			]);

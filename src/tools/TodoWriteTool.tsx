@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { isTimerSeconds } from "../config/timer.ts";
 import type { TodoItem } from "../core/bus/events.ts";
 import type { PermissionDecision } from "../core/permissions/types.ts";
 import { normalizeTodoUpdate, reconcileTodos } from "../core/todos/TodoList.ts";
@@ -18,6 +19,15 @@ const todoSchema = z.object({
 	status: z
 		.enum(["pending", "in_progress", "completed"])
 		.describe("One of pending, in_progress, or completed."),
+	timeBudgetSeconds: z
+		.number()
+		.int()
+		.min(1)
+		.refine(isTimerSeconds, "Time budget is too large.")
+		.optional()
+		.describe(
+			"Seconds you plan to spend on this step when a turn time budget is set. Allocate no more than the remaining turn budget across unfinished steps.",
+		),
 });
 
 const schema = z.object({

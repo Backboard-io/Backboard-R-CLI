@@ -7,6 +7,56 @@ import {
 import { makeContext } from "./helpers.ts";
 
 describe("TodoWriteTool", () => {
+	it("preserves omitted step budgets and accepts explicit reallocations", async () => {
+		const previous: TodoItem[] = [
+			{
+				id: "a",
+				content: "Plan",
+				status: "in_progress",
+				timeBudgetSeconds: 120,
+			},
+			{ id: "b", content: "Build", status: "pending", timeBudgetSeconds: 300 },
+		];
+		const ctx = makeContext(new AbortController().signal);
+		ctx.getTodos = () => previous;
+		let actual: TodoItem[] = [];
+		ctx.bus.on("todos:updated", (event) => {
+			actual = event.todos;
+		});
+		const tool = new TodoWriteTool();
+		await tool.execute(
+			tool.parseInput({
+				todos: [
+					{ content: "Plan", status: "completed" },
+					{ content: "Build", status: "pending", timeBudgetSeconds: 240 },
+				],
+			}),
+			ctx,
+		);
+		expect(actual).toEqual([
+			{ id: "a", content: "Plan", status: "completed", timeBudgetSeconds: 120 },
+			{
+				id: "b",
+				content: "Build",
+				status: "in_progress",
+				timeBudgetSeconds: 240,
+			},
+		]);
+	});
+
+	it("rejects invalid optional step budgets", () => {
+		const tool = new TodoWriteTool();
+		for (const timeBudgetSeconds of [0, -1, 0.5, Infinity, Number.MAX_VALUE]) {
+			expect(() =>
+				tool.parseInput({
+					todos: [
+						{ content: "Plan", status: "in_progress", timeBudgetSeconds },
+					],
+				}),
+			).toThrow();
+		}
+	});
+
 	it("trims content and preserves ids for unchanged todos", async () => {
 		const previousTodos: TodoItem[] = [
 			{ id: "todo_existing", content: "Plan work", status: "pending" },

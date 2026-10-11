@@ -14,6 +14,8 @@ export interface BackboardConfigFile {
 	memoryProfile?: MemoryProfile;
 	notify?: boolean;
 	verbose?: boolean;
+	/** Advisory per-turn wall-clock budget, in seconds. */
+	timerSeconds?: number;
 	/** User-defined HTTP model providers. Secrets remain in keys.json. */
 	providers?: CustomProviderDefinition[];
 	/** Expert mode: implementation runs on `model`, planning stays on `/model`. */

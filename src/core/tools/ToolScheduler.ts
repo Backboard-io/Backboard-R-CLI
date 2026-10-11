@@ -26,6 +26,7 @@ export interface ToolOutputMetadata {
 	name: string;
 	readOnly: boolean;
 	error: boolean;
+	stillRunning?: boolean;
 }
 
 /**

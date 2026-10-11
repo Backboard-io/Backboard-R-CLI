@@ -1,12 +1,18 @@
 import { describe, expect, it } from "bun:test";
 import { FINAL_VERIFICATION_NUDGE } from "../src/prompts/finalVerification.ts";
 import {
+	timerBudgetPrompt,
+	timerNotice,
+	timerReminder,
+} from "../src/prompts/timerPrompt.ts";
+import {
 	PLAN_UP_TO_DATE_REPLY,
 	todoReconciliationReminder,
 } from "../src/prompts/todoReminders.ts";
 import {
 	backboardThreadToMessages,
 	sortThreadsByUpdatedAt,
+	threadDisplayTitle,
 	threadUpdatedAt,
 } from "../src/providers/backboard/threads.ts";
 import type {
@@ -15,6 +21,39 @@ import type {
 } from "../src/providers/backboard/types.ts";
 
 describe("Backboard thread helpers", () => {
+	it("uses the human task for timed session title fallbacks", () => {
+		const content = `${timerBudgetPrompt(900)}\n\nFix authentication`;
+		const thread = threadWithMessages([{ role: "user", content }]);
+		expect(threadDisplayTitle(thread)).toBe("Fix authentication");
+		expect(threadDisplayTitle({ ...thread, first_user_message: content })).toBe(
+			"Fix authentication",
+		);
+		expect(threadDisplayTitle({ ...thread, title: "Explicit title" })).toBe(
+			"Explicit title",
+		);
+	});
+	it("restores human input and tool output without tagged timer context", () => {
+		const original =
+			"Error: tests failed\n<system-reminder>keep this real output</system-reminder>";
+		const messages = backboardThreadToMessages(
+			threadWithMessages([
+				{ role: "user", content: `${timerBudgetPrompt(900)}\n\nFix the tests` },
+				{
+					role: "tool",
+					content: `${original}\n\n${timerNotice(450_000, 900_000)}\n\n${timerReminder(["Previous step: planned 3m, took 8m."])}`,
+				},
+				{ role: "tool", content: original },
+			]),
+		);
+		expect(messages[0]).toMatchObject({ role: "user", text: "Fix the tests" });
+		for (const message of messages.slice(1)) {
+			expect(message).toMatchObject({
+				role: "tool",
+				results: [{ output: original }],
+			});
+		}
+	});
+
 	it("uses the latest message timestamp as the thread updated time", () => {
 		const thread = testThread("older", "2026-06-30T10:00:00", [
 			"2026-06-30T10:01:00",

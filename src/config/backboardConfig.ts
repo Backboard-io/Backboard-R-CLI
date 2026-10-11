@@ -15,6 +15,7 @@ import {
 	type ThinkingLevel,
 } from "./defaults.ts";
 import { parseCustomProviders } from "./providers.ts";
+import { isTimerSeconds } from "./timer.ts";
 
 export type { BackboardConfigFile } from "./BackboardConfigTypes.ts";
 
@@ -51,6 +52,9 @@ export function readBackboardConfig(
 			memoryProfile: readMemoryProfileConfig(config),
 			notify: typeof config.notify === "boolean" ? config.notify : undefined,
 			verbose: typeof config.verbose === "boolean" ? config.verbose : undefined,
+			timerSeconds: isTimerSeconds(config.timerSeconds)
+				? config.timerSeconds
+				: undefined,
 			providers: parseCustomProviders(config.providers),
 			expert: readExpertConfig(config),
 		};

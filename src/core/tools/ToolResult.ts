@@ -12,6 +12,8 @@ export interface ToolResult<O = unknown> {
 	title: string;
 	detail?: string;
 	detailLines?: ToolResultDetailLine[];
+	/** The tool returned control while its work continues in the background. */
+	stillRunning?: boolean;
 }
 
 export function ok<O>(

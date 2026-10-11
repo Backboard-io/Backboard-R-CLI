@@ -5,6 +5,10 @@ import {
 	toolMessage,
 	userMessage,
 } from "../../core/session/Message.ts";
+import {
+	withoutTimerPrefix,
+	withoutTimerSuffix,
+} from "../../core/session/TimerContext.ts";
 import { FINAL_VERIFICATION_NUDGE } from "../../prompts/finalVerification.ts";
 import { PLAN_UP_TO_DATE_REPLY } from "../../prompts/todoReminders.ts";
 import { truncate } from "../../utils/string.ts";
@@ -16,12 +20,14 @@ export { truncate } from "../../utils/string.ts";
 export function threadDisplayTitle(thread: BackboardThread): string {
 	const title = thread.title?.trim();
 	if (title) return title;
-	const firstUserPreview = thread.first_user_message
-		?.replace(/\s+/g, " ")
+	const firstUserPreview = withoutTimerPrefix(thread.first_user_message ?? "")
+		.replace(/\s+/g, " ")
 		.trim();
 	if (firstUserPreview) return truncate(firstUserPreview, 60);
 	const firstUser = thread.messages.find((message) => message.role === "user");
-	const content = firstUser?.content?.replace(/\s+/g, " ").trim();
+	const content = withoutTimerPrefix(firstUser?.content ?? "")
+		.replace(/\s+/g, " ")
+		.trim();
 	if (content) return truncate(content, 60);
 	return `Session ${thread.thread_id.slice(0, 8)}`;
 }
@@ -98,7 +104,7 @@ function backboardMessageToSessionMessage(
 			// Injected system notifications persist server-side as ordinary user
 			// messages; drop them on resume so they don't render as human input.
 			if (isInjectedNotificationMessage(message, content)) return null;
-			return userMessage(content);
+			return userMessage(withoutTimerPrefix(content));
 		case "assistant": {
 			const toolCalls = toolCallsFromMetadata(message.metadata_);
 			// The hidden reconciliation reply was never shown; keep it that way.
@@ -117,7 +123,7 @@ function backboardMessageToSessionMessage(
 				{
 					toolCallId: stringMetadata(message.metadata_, "tool_call_id") ?? "",
 					name: stringMetadata(message.metadata_, "tool_name") ?? "Tool",
-					output: content,
+					output: withoutTimerSuffix(content),
 					isError: message.status === "FAILED",
 				},
 			]);

@@ -143,6 +143,7 @@ export class ToolInvocationRunner {
 					name: ref.name,
 					readOnly: entry.tool.isReadOnly(hookInput),
 					error: false,
+					...(result.stillRunning ? { stillRunning: true } : {}),
 				},
 			};
 		} catch (err) {

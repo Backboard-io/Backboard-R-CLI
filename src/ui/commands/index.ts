@@ -1,4 +1,5 @@
 import { APP_DISPLAY_NAME } from "../../config/branding.ts";
+import { parseTimerSeconds } from "../../config/timer.ts";
 
 export type Command =
 	| { type: "message"; text: string }
@@ -23,6 +24,7 @@ export type Command =
 	| { type: "sessions"; id?: string }
 	| { type: "notify" }
 	| { type: "verbose" }
+	| { type: "timer"; seconds: number | null; error?: string }
 	| { type: "update" }
 	| { type: "undo" }
 	| { type: "redo" }
@@ -146,6 +148,11 @@ export const SLASH_COMMANDS: readonly SlashCommandDefinition[] = [
 		description: "Check for a newer CLI version",
 	},
 	{
+		name: "timer",
+		type: "timer",
+		description: "Set a per-turn time budget in seconds (/timer to clear)",
+	},
+	{
 		name: "undo",
 		type: "undo",
 		description: "Revert files changed by the last turn",
@@ -194,6 +201,21 @@ export function parseCommand(input: string): Command {
 	const name = rawName.toLowerCase();
 	const definition = findSlashCommand(name);
 	if (definition) {
+		if (definition.type === "timer") {
+			const value = rawArgs.join(" ");
+			try {
+				return {
+					type: "timer",
+					seconds: value ? (parseTimerSeconds(value) ?? null) : null,
+				};
+			} catch {
+				return {
+					type: "timer",
+					seconds: null,
+					error: "Use /timer <positive whole seconds>, or /timer to clear.",
+				};
+			}
+		}
 		if (definition.type === "sessions") {
 			const id = rawArgs.join(" ").trim();
 			return id ? { type: "sessions", id } : { type: "sessions" };
@@ -238,6 +260,7 @@ export function canRunCommandAfterSessionEnd(
 		command === "lsp" ||
 		command === "notify" ||
 		command === "verbose" ||
+		command === "timer" ||
 		command === "update" ||
 		command === "undo" ||
 		command === "redo" ||

@@ -41,6 +41,7 @@ import {
 	qUserMcpConfigPath,
 } from "./paths.ts";
 import { getProfile, type Profile } from "./profiles/index.ts";
+import { isTimerSeconds, parseTimerSeconds } from "./timer.ts";
 
 export interface ConfigOptions {
 	env?: BackboardEnv;
@@ -85,6 +86,7 @@ export class Config {
 	private skillDiscoveryEnabled = false;
 	private notifyEnabled = false;
 	private verboseEnabled = true;
+	private currentTimerSeconds: number | undefined;
 	private readonly currentMemoryProfile: MemoryProfile;
 	private currentThinking: ThinkingIntent | null | undefined;
 	private expertEnabled = false;
@@ -177,6 +179,10 @@ export class Config {
 		}
 		this.notifyEnabled = persistedConfig.notify ?? false;
 		this.verboseEnabled = persistedConfig.verbose ?? true;
+		this.currentTimerSeconds = parseTimerSeconds(
+			this.flags.timer,
+			persistedConfig.timerSeconds,
+		);
 		this.excludedToolNames = parseExcludedTools(this.flags.excludedTools).map(
 			canonicalToolName,
 		);
@@ -313,6 +319,29 @@ export class Config {
 
 	setVerbose(enabled: boolean): void {
 		this.verboseEnabled = enabled;
+	}
+
+	get timerSeconds(): number | undefined {
+		return this.currentTimerSeconds;
+	}
+
+	setTimerSeconds(seconds: number | undefined): void {
+		if (seconds !== undefined && !isTimerSeconds(seconds)) {
+			throw new Error(
+				"Time budget must be a positive whole number of seconds.",
+			);
+		}
+		this.currentTimerSeconds = seconds;
+	}
+
+	async saveTimerPreference(): Promise<void> {
+		await this.enqueueSave(async () => {
+			const existing = readBackboardConfig(this.persistedConfigHomeDir);
+			await saveBackboardConfig(
+				{ ...existing, timerSeconds: this.currentTimerSeconds },
+				this.persistedConfigHomeDir,
+			);
+		});
 	}
 
 	get memoryProfile(): MemoryProfile {

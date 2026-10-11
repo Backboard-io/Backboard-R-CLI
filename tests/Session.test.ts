@@ -8,6 +8,38 @@ import {
 import { Session } from "../src/core/session/Session.ts";
 
 describe("Session", () => {
+	it("restores inherited allocations across status-only todo updates", () => {
+		const session = new Session("timer-resume");
+		const write = (id: string, todos: unknown[]) => [
+			assistantMessage("", [{ id, name: "todo_write", input: { todos } }]),
+			toolMessage([
+				{
+					toolCallId: id,
+					name: "todo_write",
+					output: "Updated todos",
+					isError: false,
+				},
+			]),
+		];
+		session.hydrate({
+			threadId: "thread",
+			messages: [
+				...write("plan", [
+					{ content: " A ", status: "in_progress", timeBudgetSeconds: 120 },
+					{ content: "B", status: "pending", timeBudgetSeconds: 300 },
+				]),
+				...write("advance", [
+					{ content: "A", status: "completed" },
+					{ content: "B", status: "in_progress" },
+				]),
+			],
+		});
+		expect(session.todos).toMatchObject([
+			{ content: "A", status: "completed", timeBudgetSeconds: 120 },
+			{ content: "B", status: "in_progress", timeBudgetSeconds: 300 },
+		]);
+	});
+
 	it("tracks todos from bus events and clears completed todos on next turn", () => {
 		const bus = new EventBus();
 		const session = new Session("sess_test");

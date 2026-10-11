@@ -72,6 +72,7 @@ import {
 	HELP_TEXT,
 	parseCommand,
 } from "./commands/index.ts";
+import { handleTimerCommand } from "./commands/timer.ts";
 import { AskUserPrompt } from "./components/AskUserPrompt.tsx";
 import { ContextPanel } from "./components/ContextPanel.tsx";
 import { HookAddForm } from "./components/HookAddForm.tsx";
@@ -1699,6 +1700,10 @@ export function App({
 					agent.notice(
 						`Detailed tool output ${next ? "enabled" : "disabled"}.`,
 					);
+					break;
+				}
+				case "timer": {
+					void handleTimerCommand(command, config, agent.notice);
 					break;
 				}
 				case "update":

@@ -309,6 +309,12 @@ describe("isDangerousCommand", () => {
 		expect(isDangerousCommand("git checkout -f main")).toBeDefined();
 		expect(isDangerousCommand("git checkout --force main")).toBeDefined();
 		expect(
+			isDangerousCommand("git checkout -B release-1.2 main"),
+		).toBeDefined();
+		expect(
+			isDangerousCommand("git switch -C feature main"),
+		).toBeDefined();
+		expect(
 			isDangerousCommand("git switch --discard-changes main"),
 		).toBeDefined();
 		expect(isDangerousCommand("git switch -f main")).toBeDefined();

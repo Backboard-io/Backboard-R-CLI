@@ -700,7 +700,8 @@ function gitReason(
 		return "discards local changes";
 	}
 	if (subcommand === "checkout") {
-		if (args.includes("-b") || args.includes("-B")) return undefined;
+		if (args.includes("-B")) return "deletes or overwrites a branch";
+		if (args.includes("-b")) return undefined;
 		if (args.includes("-f") || args.includes("--force")) {
 			return "discards local changes";
 		}
@@ -711,13 +712,15 @@ function gitReason(
 			return "discards local changes";
 		}
 	}
-	if (
-		subcommand === "switch" &&
-		(args.includes("-f") ||
+	if (subcommand === "switch") {
+		if (args.includes("-C")) return "deletes or overwrites a branch";
+		if (
+			args.includes("-f") ||
 			args.includes("--force") ||
-			args.includes("--discard-changes"))
-	) {
-		return "discards local changes";
+			args.includes("--discard-changes")
+		) {
+			return "discards local changes";
+		}
 	}
 	if (subcommand === "branch") {
 		if (

@@ -2,14 +2,15 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { loadBrowserEnv } from "../src/config/env.ts";
 import { BrowserSessionManager } from "../src/core/browser/BrowserSessionManager.ts";
 
 const screenshotDir = await mkdtemp(join(tmpdir(), "browser-smoke-"));
 const manager = new BrowserSessionManager({
 	env: {
-		...process.env,
-		BROWSER_CDP_URL: undefined,
-		BROWSER_WS_URL: undefined,
+		...loadBrowserEnv(),
+		browserCdpUrl: undefined,
+		browserWsUrl: undefined,
 	},
 });
 
